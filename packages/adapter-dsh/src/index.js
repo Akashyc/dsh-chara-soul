@@ -105,15 +105,19 @@ export function apply(ctx, _config, deps = {}) {
     c.effect(() =>
       c.commands.register({
         name: 'chara',
-        description: '角色灵魂引擎：new <名字> | list | use <名字> | show | profile | status',
-        input: { hint: 'new <名字> | list | use <名字> | show | profile | status' },
+        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | show | profile | status',
+        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | show | profile | status' },
         handler: async (inv) => {
           const raw = String(inv.rawInput ?? '').trim();
           if (raw === 'status') return { kind: 'success', text: status(inv) };
           const r = core.command(raw);
           sync();
           let text = r.text;
-          if (raw === 'show' && lastAssembly) text += `\n\n【其他插件注入的段】\n系统提示：${groupSections(lastAssembly.sections) || '无'}\n运行时上下文：${groupSections(lastAssembly.contexts) || '无'}`;
+          if (raw === 'show' && lastAssembly) {
+            const mark = (list, n) => `${n} ${list.includes(n) ? '✓' : '✗'}`;
+            text += `\n\n【上次实际组装】\n${mark(lastAssembly.sections, 'chara:nature')}（系统提示）  ${mark(lastAssembly.contexts, 'chara:moment')}（运行时上下文）`;
+            text += `\n\n【其他插件注入的段】\n系统提示：${groupSections(lastAssembly.sections) || '无'}\n运行时上下文：${groupSections(lastAssembly.contexts) || '无'}`;
+          }
           return { kind: r.ok ? 'success' : 'error', text };
         },
       }),

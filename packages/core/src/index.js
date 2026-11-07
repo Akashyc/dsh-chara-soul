@@ -1,6 +1,6 @@
 // 核心入口：不依赖任何宿主。适配器与 cli 都只通过这里访问（架构方案第四节）。
 import path from 'node:path';
-import { statSync, existsSync } from 'node:fs';
+import { statSync, existsSync, readFileSync } from 'node:fs';
 import { dataHome, ensureHome } from './store/index.js';
 import { openRoster } from './roster/index.js';
 import { readCard, readYaml, writeText, cardTemplate, profileTemplate } from './card/index.js';
@@ -79,6 +79,17 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
       roster.setCurrent(row.id);
       return ok(`已创建个体「${name}」（${row.id}）并切换过去。\n角色卡在 ${cardFile(row.id)}，编辑保存后下一轮生效。`);
     },
+    /** 导入一张写好的卡：校验后建个体并切换过去，原文件不动，注释原样保留。 */
+    import(arg) {
+      const file = arg.replace(/^["']|["']$/g, '');
+      if (!file) return fail('用法：import <角色卡文件路径>');
+      if (!/\.ya?ml$/i.test(file)) return fail('目前只支持本项目的 YAML 角色卡；SillyTavern 的 JSON / PNG 导入在后续版本提供。');
+      const card = readCard(path.resolve(file));
+      const row = roster.add(card.name);
+      writeText(cardFile(row.id), readFileSync(path.resolve(file), 'utf8').replace(/^﻿/, ''));
+      roster.setCurrent(row.id);
+      return ok(`已导入个体「${card.name}」（${row.id}）并切换过去，下一轮生效。\n角色卡已复制到 ${cardFile(row.id)}，之后改那一份。`);
+    },
     list() {
       const cur = roster.current()?.id;
       const rows = roster.list();
@@ -101,16 +112,18 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
       if (!existsSync(f)) writeText(f, profileTemplate());
       return ok(`用户画像在 ${f}，编辑保存后下一轮生效。`);
     },
-    help: () => ok('子命令：new <名字> | list | use <名字或 id> | show | profile'),
+    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | show | profile'),
   };
 
   /** 用户命令。raw 是子命令及参数的原文，如 "use 蒂普茜柯"。 */
   function command(raw = '') {
-    const [sub = 'help', ...rest] = raw.trim().split(/\s+/).filter(Boolean);
-    const h = commands[sub];
+    // 子命令之后的文字原样交给子命令，路径里的空格不被改动
+    const [, sub, arg] = raw.trim().match(/^(\S*)\s*([\s\S]*)$/);
+    if (!sub) return commands.help();
+    const h = Object.hasOwn(commands, sub) ? commands[sub] : null;
     if (!h) return fail(`未知子命令 ${sub}。${commands.help().text}`);
     try {
-      return h(rest.join(' '));
+      return h(arg.trim());
     } catch (e) {
       return fail(`${sub} 出错：${e.message}`);
     }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createCore } from 'chara-core';
@@ -145,3 +145,24 @@ test('原话按个体分库，cli 也能读（验收 10 的前提）', async () 
     life.close();
   });
 });
+
+test('import：导入写好的卡，注释原样保留；坏卡与不支持的格式拒绝', () =>
+  withHome(({ core, home }) => {
+    const src = path.join(home, '我的  卡片', 'card.yaml'); // 路径里有连续空格
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, '﻿# 我写的注释\r\nname: 蒂普茜柯·一世\r\nspeech: |\r\n  自称本鱼\r\n');
+    const r = core.command(`import "${src}"`);
+    assert.ok(r.ok, r.text);
+    assert.match(core.nature(), /你是蒂普茜柯·一世/);
+    assert.match(core.nature(), /自称本鱼/);
+    const copy = r.text.match(/复制到 (.+card\.yaml)/)[1];
+    assert.equal(readFileSync(copy, 'utf8'), '# 我写的注释\nname: 蒂普茜柯·一世\nspeech: |\n  自称本鱼\n', '去 BOM、转 LF、保留注释');
+    assert.match(readFileSync(src, 'utf8'), /\r\n/, '原文件不动');
+
+    writeFileSync(src, 'speech: 没名字\n');
+    assert.match(core.command(`import ${src}`).text, /缺少 name/);
+    assert.match(core.command('import a.png').text, /只支持本项目的 YAML/);
+    assert.match(core.command('import').text, /用法/);
+    assert.match(core.command('').text, /子命令/);
+    assert.equal(core.command('toString').ok, false, '原型上的名字不是子命令');
+  }));
