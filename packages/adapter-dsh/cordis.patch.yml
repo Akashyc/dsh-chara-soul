@@ -1,0 +1,5 @@
+# DSH 在 dsh.profile.bundles 里列出本包时自动加载这一层。
+# 不要把这段 insert 抄进 profile 的 cordis.patch.yml，否则 id 重复、设置无法保存。
+- insert:
+    - id: chara-soul
+      name: dsh-chara-soul
