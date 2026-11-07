@@ -2,6 +2,9 @@
 // 只用命名导出：有 export default 时 DSH 加载器会丢掉 inject 与 Config。
 import { createCore } from 'chara-core';
 
+// 宿主路由提供 @deepseek-ai/dsh-tools；本地测试时没有，退化为原样返回。
+const { defineTool } = await import('@deepseek-ai/dsh-tools').catch(() => ({ defineTool: (d) => d }));
+
 export const name = 'chara-soul';
 export const inject = [];
 
@@ -72,6 +75,9 @@ export function apply(ctx, _config, deps = {}) {
     return out;
   });
 
+  // 分身：chara_envoy 派出时登记，分身会话里取最后一句话作汇报，结算通知到达时落库。子会话 id → { session, task, report }
+  const envoys = new Map();
+
   // 原话：只记主会话里用户亲口说的话和模型说出来的话
   ctx.on('session/event', (session, event) => {
     try {
@@ -80,6 +86,24 @@ export function apply(ctx, _config, deps = {}) {
       const d = event.data ?? {};
       // 实测：user/message 的 data 就是消息本身；assistant/message 的 data 是 { turn, step, message }
       const message = d.message ?? d;
+      const parent = session?.header?.parentSession;
+      if (parent) {
+        // 分身会话一律不记原话；我们派出的分身取最后一句非空回复作汇报
+        // （分身先用 send_message 回报时，结算通知里会省略最后一句，所以不从通知里取）
+        if (event.type === 'assistant/message' && envoys.has(sid)) {
+          const t = messageText(message).trim();
+          if (t) envoys.get(sid).report = t;
+        }
+        return;
+      }
+      if (event.type === 'user/message' && message?.source?.kind === 'subagent-settled') {
+        const e = envoys.get(message.source.senderSessionId);
+        if (e) {
+          core.envoyReport({ id: message.source.senderSessionId, ...e });
+          envoys.delete(message.source.senderSessionId);
+        }
+        return;
+      }
       if (event.type === 'user/message') {
         if (!isUserSpeech(message)) return;
         // 实测 header：分身会话带 parentSession、origin: 'subagent'、delegationDepth ≥ 1
@@ -92,6 +116,46 @@ export function apply(ctx, _config, deps = {}) {
     } catch (e) {
       log.warn('记录原话失败：%s', e?.message ?? e);
     }
+  });
+
+  // 派分身（验收 6）。工具始终注册（架构方案 12.2）；不能派时让本体自己做（验收 7）
+  ctx.inject(['tools'], (c) => {
+    c.effect(() =>
+      c.tools.register(
+        defineTool({
+          name: 'chara_envoy',
+          description: '派一个分身去办要读写文件、跑命令或比较耗时的事。立即返回；分身办完后你会收到它的汇报，再用自己的话转告用户。',
+          parameters: {
+            task: { type: 'string', required: true, description: '要办的事，写清对象、范围与具体要求' },
+            acceptance: { type: 'string', description: '怎样算办完' },
+            context: { type: 'string', description: '分身需要知道的用户偏好与背景' },
+          },
+          output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
+          async execute(args, exec) {
+            const brief = core.envoyBrief(args);
+            if (!brief) return '没有个体或没有任务，没有派出分身。';
+            const subagents = ctx.get?.('subagents');
+            if (!subagents?.startActivation || !exec?.agent) return '当前不能派分身。请你在这一轮里自己把事办完。';
+            // 实测：分身会话也被注入了本性，会看到「用 chara_envoy」；只许主会话派，防止分身再派分身
+            if (!mainSessions.has(String(exec.agent.session?.id))) return '你自己就是分身，不能再派分身。请直接把事办完，按简报汇报。';
+            try {
+              const { childId } = await subagents.startActivation({
+                provider: 'spawn',
+                label: [...String(args.task).trim()].slice(0, 20).join(''),
+                delivery: 'parent',
+                signal: exec.signal,
+                request: { prompt: [{ type: 'text', text: brief }], parent: exec.agent },
+              });
+              envoys.set(childId, { session: String(exec.agent.session?.id ?? '?'), task: String(args.task).trim(), report: '' });
+              return `分身 ${childId} 已出发。先回用户一句，继续陪聊；它办完后你会收到汇报。`;
+            } catch (e) {
+              log.warn('派分身失败：%s', e?.message ?? e);
+              return `派分身失败（${e?.code ?? e?.message ?? e}）。请你在这一轮里自己把事办完。`;
+            }
+          },
+        }),
+      ),
+    );
   });
 
   const status = (inv) =>

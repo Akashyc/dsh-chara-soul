@@ -4,7 +4,7 @@ import { statSync, existsSync, readFileSync } from 'node:fs';
 import { dataHome, ensureHome } from './store/index.js';
 import { openRoster } from './roster/index.js';
 import { readCard, readYaml, writeText, cardTemplate, profileTemplate } from './card/index.js';
-import { buildNature } from './nature/index.js';
+import { buildNature, buildBrief } from './nature/index.js';
 import { floor5, zone, timeLines } from './chrono/index.js';
 import { openLife } from './memory/life.js';
 
@@ -66,6 +66,20 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
     c.life.setMeta('prev_user_at', c.life.meta('last_user_at'));
     c.life.setMeta('last_user_at', at);
     if (tz) c.life.setMeta('tz', tz);
+  }
+
+  /** 分身的简报。没有个体或没有任务时返回空串。 */
+  function envoyBrief(args = {}) {
+    const row = roster.current();
+    return row && args.task?.trim() ? buildBrief(row.name, args) : '';
+  }
+
+  /** 分身完成后的汇报，记在当前个体名下。返回出处，没有个体时返回 null。 */
+  function envoyReport({ id, session, task, report, at = now() }) {
+    const c = current();
+    if (!c) return null;
+    c.life.appendEnvoy({ id, session, task, report, at, host });
+    return `src:envoy/${id}`;
   }
 
   const ok = (text) => ({ ok: true, text });
@@ -134,5 +148,5 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
     roster.close();
   }
 
-  return { nature, moment, afterTurn, command, close, home };
+  return { nature, moment, afterTurn, envoyBrief, envoyReport, command, close, home };
 }

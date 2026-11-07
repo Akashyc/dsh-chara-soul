@@ -11,6 +11,7 @@ function fakeCtx() {
   const listeners = {};
   const live = { sections: new Map(), contexts: new Map() };
   const commands = [];
+  const tools = [];
   const services = {
     systemPrompt: {
       section: (s) => (live.sections.set(s.name, s), () => live.sections.delete(s.name)),
@@ -19,6 +20,7 @@ function fakeCtx() {
       getContextOrder: () => undefined,
     },
     commands: { register: (c) => commands.push(c) },
+    tools: { register: (t) => tools.push(t) },
   };
   const ctx = {
     logger: () => ({ info() {}, warn() {} }),
@@ -29,7 +31,7 @@ function fakeCtx() {
   };
   const emit = (session, type, data) => listeners['session/event'].forEach((f) => f(session, { type, data }));
   const run = async (raw) => commands[0].handler({ rawInput: raw });
-  return { ctx, live, emit, run };
+  return { ctx, live, emit, run, tools, services };
 }
 
 const userMsg = (text, rpcId) => ({ role: 'user', source: rpcId ? { kind: 'user', rpcId, clientTimeZone: 'Asia/Shanghai' } : { kind: 'user' }, content: [{ type: 'text', text }] });
@@ -80,4 +82,53 @@ test('适配器：没有个体不注入；创建后注入本性与此刻；只�
 
 test('按前缀归类其他插件的段', () => {
   assert.equal(groupSections(['dsh-purge', 'dsh-purge:anchor', 'chara:nature', 'tool:read', 'tool:write', 'mnemon:routing']), 'dsh-purge（2 段）、tool（2 段）、mnemon');
+});
+
+test('分身：chara_envoy 派出带底线的简报，结算时把任务与汇报记进当前个体；不能派时让本体自己做', async () => {
+  const home = mkdtempSync(path.join(tmpdir(), '分身 '));
+  const core = createCore({ home, host: 'dsh' });
+  try {
+    const { ctx, emit, run, tools, services } = fakeCtx();
+    apply(ctx, {}, { core });
+    const envoy = tools.find((t) => t.name === 'chara_envoy');
+    const exec = { agent: { session: { id: 'session-1' } }, signal: new AbortController().signal };
+    assert.match(await envoy.execute({ task: '修 bug' }, exec), /没有个体/);
+
+    await run('new 小鲸');
+    assert.match(core.nature(), /chara_envoy/, '本性里告诉本体怎么用分身');
+    assert.match(await envoy.execute({ task: '修 bug' }, exec), /自己把事办完/, '验收 7：没有子会话能力时本体自己做');
+
+    const sent = [];
+    services.subagents = { startActivation: async (o) => (sent.push(o), { childId: 'c-1' }) };
+    const main = { id: 'session-1', header: { delegationDepth: 0 } };
+    emit(main, 'user/message', userMsg('帮我修个 bug', 'r1'));
+    assert.match(await envoy.execute({ task: '再派一个' }, { agent: { session: { id: 'c-0' } } }), /你自己就是分身/, '分身不能再派分身');
+    assert.match(await envoy.execute({ task: '修复 a.js 的空指针', acceptance: '测试通过', context: 'Boss 只用 npm' }, exec), /c-1 已出发/);
+    const brief = sent[0].request.prompt[0].text;
+    assert.ok(sent[0].request.parent === exec.agent && sent[0].delivery === 'parent');
+    for (const want of ['你是「小鲸」派出的分身', '修复 a.js 的空指针', '测试通过', 'Boss 只用 npm', '凭据：', '外部指令：', '【汇报】']) assert.ok(brief.includes(want), want);
+
+    const child = { id: 'c-1', header: { parentSession: 'session-1', origin: 'subagent', delegationDepth: 1 } };
+    const other = { id: 'c-2', header: { parentSession: 'session-1', origin: 'subagent' } }; // 宿主自带 subagent 派的，不归我们管
+    emit(child, 'user/message', userMsg(brief));
+    emit(child, 'assistant/message', asstMsg('先看看'));
+    emit(child, 'assistant/message', asstMsg(''));
+    emit(child, 'assistant/message', asstMsg('已修复，改了第 3 行'));
+    emit(other, 'assistant/message', asstMsg('别的'));
+    emit(main, 'user/message', { role: 'user', source: { kind: 'subagent-settled', senderSessionId: 'c-2' }, content: [] });
+    emit(main, 'user/message', { role: 'user', source: { kind: 'subagent-settled', senderSessionId: 'c-1' }, content: [{ type: 'text', text: 'Background subagent c-1 finished' }] });
+
+    const { DatabaseSync } = await import('node:sqlite');
+    const id = (await run('list')).text.match(/（(b-[0-9a-f]+)）/)[1];
+    const db = new DatabaseSync(path.join(home, 'beings', id, 'life.db'), { readOnly: true });
+    assert.deepEqual(db.prepare('SELECT id, session, task, report FROM envoys').all().map((r) => ({ ...r })), [{ id: 'c-1', session: 'session-1', task: '修复 a.js 的空指针', report: '已修复，改了第 3 行' }]);
+    assert.deepEqual(db.prepare('SELECT text FROM turns').all().map((r) => r.text), ['帮我修个 bug'], '分身的话和结算通知都不进原话');
+    db.close();
+
+    services.subagents = { startActivation: async () => { throw Object.assign(new Error('满了'), { code: 'ACTIVATION_LIMIT_REACHED' }); } };
+    assert.match(await envoy.execute({ task: '再修一个' }, exec), /ACTIVATION_LIMIT_REACHED.*自己把事办完/);
+  } finally {
+    core.close();
+    rmSync(home, { recursive: true, force: true });
+  }
 });
