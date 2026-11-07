@@ -1,8 +1,17 @@
 {
   "name": "chara-core",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
-  "exports": { "./store": "./src/store/index.js" },
-  "engines": { "node": ">=24" }
+  "exports": {
+    ".": "./src/index.js",
+    "./store": "./src/store/index.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  }
 }

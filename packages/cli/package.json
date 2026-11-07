@@ -1,0 +1,11 @@
+{
+  "name": "chara-cli",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "description": "角色灵魂引擎命令行：不经宿主直接读写个体数据",
+  "type": "module",
+  "bin": { "chara": "src/main.js" },
+  "engines": { "node": ">=24" },
+  "dependencies": { "chara-core": "0.0.0" }
+}
