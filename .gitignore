@@ -11,3 +11,6 @@ Thumbs.db
 # 私有：个人角色卡与开发文档，不发布
 cards/
 docs/
+
+# 私有：开发用的样本导出脚本
+scripts/export-samples.mjs
