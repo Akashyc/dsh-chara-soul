@@ -1,0 +1,8 @@
+{
+  "name": "chara-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { "./store": "./src/store/index.js" },
+  "engines": { "node": ">=24" }
+}
