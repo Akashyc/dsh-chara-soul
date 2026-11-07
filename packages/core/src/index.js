@@ -1,9 +1,11 @@
 // 核心入口：不依赖任何宿主。适配器与 cli 都只通过这里访问（架构方案第四节）。
 import path from 'node:path';
-import { statSync, existsSync, readFileSync } from 'node:fs';
+import { statSync, existsSync, readFileSync, copyFileSync } from 'node:fs';
+import YAML from 'yaml';
 import { dataHome, ensureHome } from './store/index.js';
 import { openRoster } from './roster/index.js';
-import { readCard, readYaml, writeText, cardTemplate, profileTemplate } from './card/index.js';
+import { readCard, readYaml, writeText, validateCard, cardText, cardTemplate, profileTemplate } from './card/index.js';
+import { readTavernJson, fromTavern } from './card/tavern.js';
 import { buildNature, buildBrief } from './nature/index.js';
 import { floor5, zone, timeLines } from './chrono/index.js';
 import { openLife } from './memory/life.js';
@@ -93,11 +95,29 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
       roster.setCurrent(row.id);
       return ok(`已创建个体「${name}」（${row.id}）并切换过去。\n角色卡在 ${cardFile(row.id)}，编辑保存后下一轮生效。`);
     },
-    /** 导入一张写好的卡：校验后建个体并切换过去，原文件不动，注释原样保留。 */
+    /** 导入一张写好的卡：校验后建个体并切换过去，原文件不动。本项目的 YAML 注释原样保留；SillyTavern 的 JSON / PNG 先转换。 */
     import(arg) {
       const file = arg.replace(/^["']|["']$/g, '');
       if (!file) return fail('用法：import <角色卡文件路径>');
-      if (!/\.ya?ml$/i.test(file)) return fail('目前只支持本项目的 YAML 角色卡；SillyTavern 的 JSON / PNG 导入在后续版本提供。');
+      const ext = path.extname(file).toLowerCase();
+      if (ext === '.json' || ext === '.png') {
+        const t = fromTavern(readTavernJson(path.resolve(file)));
+        const title = t.title && t.title !== t.name ? `（卡片标题「${t.title}」）` : '';
+        const text = cardText(t, `# 由 SillyTavern 角色卡「${path.basename(file)}」${title}转换，原文件存为同目录的 source${ext}。酒馆卡没有口吻字段，建议补上 speech。`);
+        validateCard(YAML.parse(text)); // 写入名册前先确认转出来的卡能读
+        const row = roster.add(t.name);
+        writeText(cardFile(row.id), text);
+        copyFileSync(path.resolve(file), path.join(beingDir(row.id), `source${ext}`));
+        roster.setCurrent(row.id);
+        const nature = buildNature(t);
+        const notes = [
+          !nature.includes(t.personality) && `性格设定有 ${[...t.personality].length} 字，超出本性预算，后半部分会被截掉；建议精简 card.yaml 里的 personality。`,
+          t.lorebook.length && `世界书 ${t.lorebook.length} 条已存进 lorebook，记忆功能上线后成为初始记忆。`,
+          t.dropped.length && `没有导入 ${t.dropped.join('、')}：那是给模型的指令，可能和底线冲突。`,
+        ].filter(Boolean);
+        return ok([`已导入酒馆角色卡「${t.name}」（${row.id}）并切换过去，下一轮生效。`, `转换后的角色卡在 ${cardFile(row.id)}，建议补上口吻（speech）。`, ...notes].join('\n'));
+      }
+      if (!/\.ya?ml$/i.test(file)) return fail('只支持本项目的 YAML 角色卡，以及 SillyTavern 的 JSON / PNG 角色卡。');
       const card = readCard(path.resolve(file));
       const row = roster.add(card.name);
       writeText(cardFile(row.id), readFileSync(path.resolve(file), 'utf8').replace(/^﻿/, ''));
