@@ -30,7 +30,7 @@
 https://github.com/Akashyc/dsh-chara-soul
 ```
 
-DSH 会装上仓库 `main` 分支的最新代码（依赖写成 `github:Akashyc/dsh-chara-soul`），构建好的网页界面已包含在内。装好后在对话框里输入 `/chara status`，能看到服务列表和数据目录就成功了。更新时在插件页面先卸载再安装（直接重新安装会沿用旧版本），个体数据不受影响。
+DSH 会装上仓库 `main` 分支的最新代码（依赖写成 `github:Akashyc/dsh-chara-soul`），构建好的网页界面已包含在内。装好后在对话框里输入 `/chara status`，能看到服务列表和数据目录就成功了。有新版本时在插件页面直接更新，个体数据不受影响。
 
 插件页面找不到从 GitHub 安装的入口，或想固定装某个发布版本时，可以手动登记（下面的地址是最新 Release 的安装包）：先完全退出 DSH（托盘图标右键退出，只关窗口它还在后台运行），在 `%USERPROFILE%\.dsh\profiles\desktop\package.json` 里加两处，再启动 DSH：
 
