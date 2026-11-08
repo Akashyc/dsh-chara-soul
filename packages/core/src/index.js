@@ -1,6 +1,6 @@
 // 核心入口：不依赖任何宿主。适配器与 cli 都只通过这里访问（架构方案第四节）。
 import path from 'node:path';
-import { statSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync, rmSync, readdirSync, renameSync } from 'node:fs';
+import { statSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync, rmSync, readdirSync, renameSync, mkdirSync } from 'node:fs';
 import YAML from 'yaml';
 import { dataHome, ensureHome, pointerFile, readPointer, writePointer, syncFolderWarning, copyHome, isEmptyTarget, homeEntries } from './store/index.js';
 import { openRoster } from './roster/index.js';
@@ -37,6 +37,13 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     return kind;
   };
   const profileFile = () => path.join(home, 'profiles', `${roster.getState('profile') ?? 'default'}.yaml`);
+  const userAvatars = () => imageNames(profileFile().replace(/\.yaml$/, '.avatar')); // 用户头像跟画像放一起：profiles/<画像>.avatar.png
+  // 认文件头，只收 PNG、JPG、WebP
+  const imageExt = (buf) => {
+    const ext = buf.subarray(0, 4).toString('hex') === '89504e47' ? 'png' : buf.subarray(0, 3).toString('hex') === 'ffd8ff' ? 'jpg' : buf.subarray(8, 12).toString() === 'WEBP' ? 'webp' : '';
+    if (!ext) throw new Error('只支持 PNG、JPG、WebP 图片');
+    return ext;
+  };
   const open = new Map(); // id → { life, nature, stamp, error }
   // 用户手动删掉个体文件夹时，名册行还在：只认角色卡还在的，也不替它重建文件夹（004 号决定：名册行不删）
   const alive = (id) => existsSync(cardFile(id));
@@ -261,12 +268,21 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
       roster.setState('envoy_preset', id);
     },
     imageFile: (id, kind) => imageOf(known(id), imageKind(kind)),
-    /** 换头像或形象图：认文件头，只收 PNG、JPG、WebP；导入时留下的 source.png 不动 */
+    /** 换头像或形象图；导入时留下的 source.png 不动 */
     saveImage(id, kind, buf) {
-      const ext = buf.subarray(0, 4).toString('hex') === '89504e47' ? 'png' : buf.subarray(0, 3).toString('hex') === 'ffd8ff' ? 'jpg' : buf.subarray(8, 12).toString() === 'WEBP' ? 'webp' : '';
-      if (!ext) throw new Error('只支持 PNG、JPG、WebP 图片');
+      const ext = imageExt(buf);
       for (const f of imageNames(imageKind(kind))) rmSync(path.join(beingDir(known(id)), f), { force: true });
       writeFileSync(path.join(beingDir(id), `${kind}.${ext}`), buf);
+    },
+    userAvatarFile: () => userAvatars().find((f) => existsSync(f)) ?? null,
+    /** 换用户头像（画像页），换格式时删掉旧文件 */
+    saveUserAvatar(buf) {
+      const ext = imageExt(buf);
+      const files = userAvatars();
+
+      mkdirSync(path.dirname(files[0]), { recursive: true });
+      for (const f of files) rmSync(f, { force: true });
+      writeFileSync(files.find((f) => f.endsWith(`.${ext}`)), buf);
     },
   };
 

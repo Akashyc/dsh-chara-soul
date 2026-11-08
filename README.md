@@ -194,6 +194,7 @@ npm test
 | [cyanwell/dsh-agent-soul](https://github.com/cyanwell/dsh-agent-soul) | 四条判据、能力半/身份半、SELF 推送层、溯源指针、心跳；全能 preset 的「一个人格常驻、能力按需激活、工具目录不变」 |
 | [icyaaaww/dsh-soul](https://github.com/icyaaaww/dsh-soul) | 图记忆、投影注入、supersedes、激活衰减、退役不删、受控演化、宿主能力探测 |
 | [gutuxxxxl/dsh-memory-blocks](https://github.com/gutuxxxxl/dsh-memory-blocks) | 陪伴场景三层记忆、人设保护、中文相对时间、记忆星图 |
+| [LarryE135/dsh-flash-presets](https://github.com/LarryE135/dsh-flash-presets) | 全能女仆、分身执行两个预设的早压缩（0.25 / 2 万 token）与工具输出裁剪参数，分身的干活纪律 |
 | [DeepSeek《Super-agent 设计探索》](https://zhuanlan.zhihu.com/p/2099987320443237060) | Router / Worker 双层、事件驱动与两级过滤、Inline & Spill、链式召回、状态外置、Watchdog |
 | 酒馆 Character Card V2/V3 | 角色卡导入格式 |
 

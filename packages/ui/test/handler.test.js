@@ -70,6 +70,13 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal(pt.headers.get('content-type'), 'image/png');
     assert.equal((await fetch(`${base}/api/avatar?id=${b.id}&t=tk`)).headers.get('content-type'), 'image/jpeg', '头像没被覆盖');
 
+    assert.equal((await call('GET', '/api/user-avatar')).status, 404, '还没有用户头像');
+    assert.equal((await call('PUT', '/api/user-avatar', 'not an image')).status, 400);
+    assert.equal((await call('PUT', '/api/user-avatar', jpg)).status, 200);
+    assert.equal((await call('PUT', '/api/user-avatar', png)).status, 200, '换格式时删掉旧的');
+    assert.equal((await fetch(`${base}/api/user-avatar?t=tk`)).headers.get('content-type'), 'image/png');
+    assert.equal((await fetch(`${base}/api/avatar?id=${b.id}&t=tk`)).headers.get('content-type'), 'image/jpeg', '个体头像没被覆盖');
+
     assert.equal((await call('PUT', '/api/profile', { call_me: '老板', evil: 'x' })).status, 200);
     assert.deepEqual((await call('GET', '/api/profile')).data, { call_me: '老板' });
 

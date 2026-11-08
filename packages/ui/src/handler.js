@@ -61,9 +61,9 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
       if (!headerOk && !(req.method === 'GET' && q('t') === token)) return send(403, { error: '令牌不对，请从 /chara ui 给出的链接打开' });
 
       if (is('GET', '/api/state')) return send(200, { beings: core.view.beings(), show: core.command('show').text });
-      const image = /^\/api\/(avatar|portrait)$/.exec(route)?.[1]; // 头像、形象图
+      const image = /^\/api\/(avatar|portrait|user-avatar)$/.exec(route)?.[1]; // 个体头像、形象图，用户头像
       if (image && req.method === 'GET') {
-        const f = core.view.imageFile(q('id'), image);
+        const f = image === 'user-avatar' ? core.view.userAvatarFile() : core.view.imageFile(q('id'), image);
         return f ? send(200, readFileSync(f), { '.jpg': 'image/jpeg', '.webp': 'image/webp' }[path.extname(f)] ?? 'image/png') : send(404, { error: '没有图片' });
       }
       if (is('GET', '/api/card')) return send(200, core.view.card(q('id')));
@@ -73,6 +73,7 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
 
       if (is('POST', '/api/preview')) return send(200, core.view.preview(await json()));
       if (is('PUT', '/api/card')) return core.view.saveCard(q('id'), await json()), onChange(), send(200, { ok: true });
+      if (is('PUT', '/api/user-avatar')) return core.view.saveUserAvatar(await readBody(req)), send(200, { ok: true });
       if (image && req.method === 'PUT') return core.view.saveImage(q('id'), image, await readBody(req)), send(200, { ok: true });
       if (is('PUT', '/api/profile')) return core.view.saveProfile(await json()), onChange(), send(200, { ok: true });
       if (is('PUT', '/api/settings')) return core.view.saveSettings(await json()), send(200, { ok: true });
