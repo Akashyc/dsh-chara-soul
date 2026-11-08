@@ -136,7 +136,7 @@ test('分身：chara_envoy 派出带底线的简报，结算时把任务与汇�
     services.agentPresets = { composedPreset: (c) => (c === exec.agent.ctx ? mine : undefined) };
     exec.agent.ctx = {};
     await envoy.execute({ task: '查资料' }, exec);
-    assert.equal(sent[1].request.agentPreset, 'standard', '本体在闲谈陪伴预设下，分身默认用 standard');
+    assert.equal(sent[1].request.agentPreset, 'chara-soul-envoy', '本体在闲谈陪伴预设下，分身默认用自带的分身预设');
     core.view.saveSettings({ envoyPreset: 'flash-lean-ptc-v3' });
     await envoy.execute({ task: '查资料' }, exec);
     assert.equal(sent[2].request.agentPreset, 'flash-lean-ptc-v3', '按设置里的预设派');

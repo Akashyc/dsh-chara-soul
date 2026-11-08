@@ -254,7 +254,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
 ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
     },
     /** 设置（005 号决定）：envoyPreset 是本体在自带预设（闲谈陪伴、全能女仆）下时，派分身用的预设。 */
-    settings: () => ({ envoyPreset: roster.getState('envoy_preset') ?? 'standard' }),
+    settings: () => ({ envoyPreset: roster.getState('envoy_preset') ?? 'chara-soul-envoy' }), // 默认用插件自带的分身预设
     saveSettings({ envoyPreset } = {}) {
       const id = String(envoyPreset ?? '').trim();
       if (!/^[\w.-]+$/.test(id)) throw new Error('预设 id 只能是字母、数字、点、横线、下划线');

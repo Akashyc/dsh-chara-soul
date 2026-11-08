@@ -85,7 +85,7 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.ok(changes >= 5);
 
     const s = (await call('GET', '/api/settings')).data;
-    assert.equal(s.envoyPreset, 'standard');
+    assert.equal(s.envoyPreset, 'chara-soul-envoy');
     assert.equal(s.presets, null, '宿主列不出预设时，设置页不显示分身预设');
     assert.equal(s.home.source, 'env', '没有指向文件的核心不能换目录');
     assert.equal((await call('PUT', '/api/settings', { envoyPreset: 'ptc' })).status, 200);

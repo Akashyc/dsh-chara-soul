@@ -184,3 +184,82 @@
               searchTimeoutMs: 60000
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
+
+# 「Soul·分身执行」预设（id chara-soul-envoy）：给分身用，两个自带预设下派出的分身默认用它。
+# 工具只留干活要的：终端、读写改、搜文件、后台任务、技能、待办、网页；不挂问用户（分身不和用户说话）、计划模式、目标、定时、展示、子代理。
+# 压缩与输出裁剪照 dsh-flash-presets；任务、底线、汇报格式在简报里，这里只写干活纪律。原生执行，不用 PTC。
+- insert:
+    - id: preset-chara-soul-envoy
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: chara-soul-envoy
+        name: Soul·分身执行
+        description: 给分身用：只挂干活的工具、早压缩、照简报办完就汇报，省 token。
+        order: 32
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: 你是替本体办一件事的分身。任务、底线和怎么汇报写在用户消息的简报里，照简报办。
+              suffix: |-
+                干活纪律：
+                1. 只办简报里的事，范围按字面理解；不清楚的按最保守的理解办，并在汇报里写明你的理解。
+                2. 先花一两步摸清事实再动手，不写长篇计划。互不依赖的调用放进同一步。
+                3. 看文件用 read、glob、grep，不用终端翻文件；长输出先过滤或写进临时文件，不把整段倒进对话。
+                4. 新文件写一次骨架，之后用 edit 增量改；不重写没变的文件。
+                5. 交付前对照验收标准做一次检查，报出实测结果；过了就停，不反复加测。没验证的写明。
+                6. 同一个办法失败两次就换办法；再不行，带上命令和实际输出汇报卡在哪。
+                7. 不把密钥、令牌、隐私原文放进对话，用路径指代。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+                config:
+                  thresholdRatio: 0.25
+                  retainTokens: 20000
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000

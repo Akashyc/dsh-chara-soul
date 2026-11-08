@@ -37,6 +37,8 @@ const SERVICES = ['systemPrompt', 'tools', 'commands', 'llm', 'subagents', 'agen
 
 /** 本项目自带的预设 id：闲谈陪伴、全能女仆，定义在 cordis.patch.yml（005 号决定）。 */
 export const OWN_PRESETS = ['chara-soul', 'chara-soul-maid'];
+/** 自带的分身预设，设置里「分身用的预设」默认就是它。 */
+export const ENVOY_PRESET = 'chara-soul-envoy';
 
 // 官方预设不发布显示名（界面上的名字来自宿主客户端的字典），这里补上中文名
 const BUILT_IN = { standard: '标准', ptc: 'PTC', minimal: '极简', cordis: '创造' };
@@ -232,7 +234,7 @@ export function apply(ctx, _config, deps = {}) {
             const mark = (list, n) => `${n} ${list.includes(n) ? '✓' : '✗'}`;
             text += `\n\n【上次实际组装】\n${mark(lastAssembly.sections, 'chara:nature')}（系统提示）  ${mark(lastAssembly.contexts, 'chara:moment')}（运行时上下文）`;
             const preset = presetOf(inv.agent);
-            if (preset) text += `\n\n【当前预设】${preset}${OWN_PRESETS.includes(preset) ? '' : '。人格前缀（deployment:persona-prefix）来自这个预设，可能写着「coding agent」，和本性冲突；建议陪聊选「Soul·闲谈陪伴」、干活选「Soul·全能女仆」'}`;
+            if (preset) text += `\n\n【当前预设】${preset}${[...OWN_PRESETS, ENVOY_PRESET].includes(preset) ? '' : '。人格前缀（deployment:persona-prefix）来自这个预设，可能写着「coding agent」，和本性冲突；建议陪聊选「Soul·闲谈陪伴」、干活选「Soul·全能女仆」'}`;
             text += `\n\n【其他插件注入的段】\n系统提示：${groupSections(lastAssembly.sections) || '无'}\n运行时上下文：${groupSections(lastAssembly.contexts) || '无'}`;
           }
           return { kind: r.ok ? 'success' : 'error', text };
