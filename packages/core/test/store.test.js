@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { dataHome, syncFolderWarning, ensureHome, openDb, migrate, ftsIndex, search } from 'chara-core/store';
+import { dataHome, defaultHome, pointerFile, writePointer, copyHome, syncFolderWarning, ensureHome, openDb, migrate, ftsIndex, search } from 'chara-core/store';
 
 const STEPS = [
   'CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL)',
@@ -100,3 +100,42 @@ test('ensureHome 建出目录', () =>
     ensureHome(home);
     assert.ok(existsSync(home));
   }));
+
+test('指向文件：环境变量优先，其次指向文件，最后默认位置', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), '指向 '));
+  try {
+    const env = { LOCALAPPDATA: tmp, XDG_DATA_HOME: tmp };
+    const def = dataHome(env, process.platform, tmp);
+    assert.equal(def, defaultHome(env, process.platform, tmp));
+    writePointer(pointerFile(env, process.platform, tmp), { home: path.join(tmp, '别处') });
+    assert.equal(dataHome(env, process.platform, tmp), path.join(tmp, '别处'));
+    assert.equal(dataHome({ ...env, CHARA_SOUL_HOME: path.join(tmp, '环境') }, process.platform, tmp), path.join(tmp, '环境'));
+    writeFileSync(pointerFile(env, process.platform, tmp), '坏了');
+    assert.equal(dataHome(env, process.platform, tmp), def, '指向文件读不懂时退回默认位置');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('复制数据目录：核对不过就删掉复制出来的东西，旧目录不动', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), '复制 '));
+  try {
+    const from = path.join(tmp, '旧');
+    mkdirSync(path.join(from, 'beings', 'b-1'), { recursive: true });
+    writeFileSync(path.join(from, 'beings', 'b-1', 'life.db'), '不是数据库');
+    writeFileSync(path.join(from, 'home.json'), '{}');
+    assert.throws(() => copyHome(from, path.join(tmp, '新')));
+    assert.ok(!existsSync(path.join(tmp, '新')), '失败时删掉新建的目标目录');
+    assert.ok(existsSync(path.join(from, 'beings', 'b-1', 'life.db')), '旧目录原样');
+
+    const ok = openDb(path.join(from, 'beings', 'b-1', 'ok.db'));
+    ok.db.close();
+    rmSync(path.join(from, 'beings', 'b-1', 'life.db'));
+    copyHome(from, path.join(tmp, '新'));
+    assert.ok(existsSync(path.join(tmp, '新', 'beings', 'b-1', 'ok.db')));
+    assert.ok(!existsSync(path.join(tmp, '新', 'home.json')), '指向文件不算数据，不搬');
+    assert.throws(() => copyHome(from, path.join(tmp, '新')), /已有东西/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

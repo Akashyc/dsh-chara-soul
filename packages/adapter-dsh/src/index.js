@@ -32,7 +32,13 @@ export function messageText(message) {
   return content.filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
 }
 
-const SERVICES = ['systemPrompt', 'tools', 'commands', 'llm', 'subagents', 'agents'];
+const SERVICES = ['systemPrompt', 'tools', 'commands', 'llm', 'subagents', 'agents', 'agentPresets'];
+
+/** 本项目自带的陪聊预设 id，定义在 cordis.patch.yml（005 号决定）。 */
+export const OWN_PRESET = 'chara-soul';
+
+// 官方预设不发布显示名（界面上的名字来自宿主客户端的字典），这里补上中文名
+const BUILT_IN = { standard: '标准', ptc: 'PTC', minimal: '极简', cordis: '创造' };
 
 /** 把段名按插件前缀归类，用来列出别的插件注入了什么（002 号决定）。 */
 export function groupSections(names) {
@@ -52,6 +58,15 @@ export function apply(ctx, _config, deps = {}) {
 
   const mainSessions = new Set();
   let lastAssembly;
+
+  /** 某个会话正在用的预设 id；宿主没有预设服务时退回会话头里记的，都拿不到时为 undefined。 */
+  const presetOf = (agent) => ctx.get?.('agentPresets')?.composedPreset?.(agent?.ctx) ?? agent?.session?.header?.agentPreset;
+
+  /** 已注册、能用的预设，给设置页的下拉框；拿不到列表时返回 null，界面退回文本框。 */
+  const listPresets = async () => {
+    const list = await ctx.get?.('agentPresets')?.list?.();
+    return Array.isArray(list) ? list.filter((p) => !p.broken).map((p) => ({ id: p.id, name: p.name ?? BUILT_IN[p.id] ?? p.id })) : null;
+  };
 
   // 本性走系统提示段，此刻走运行时上下文。没有个体时两段都不注册，什么都不注入（验收 1）
   let sync = () => {};
@@ -141,13 +156,15 @@ export function apply(ctx, _config, deps = {}) {
             if (!subagents?.startActivation || !exec?.agent) return '当前不能派分身。请你在这一轮里自己把事办完。';
             // 实测：分身会话也被注入了本性，会看到「用 chara_envoy」；只许主会话派，防止分身再派分身
             if (!mainSessions.has(String(exec.agent.session?.id))) return '你自己就是分身，不能再派分身。请直接把事办完，按简报汇报。';
+            // 本体在「角色灵魂」预设下工具很少，分身改用设置里的全量预设；别的预设本来就是全量的，让分身继承
+            const preset = presetOf(exec.agent) === OWN_PRESET ? core.view.settings().envoyPreset : undefined;
             try {
               const { childId } = await subagents.startActivation({
                 provider: 'spawn',
                 label: [...String(args.task).trim()].slice(0, 20).join(''),
                 delivery: 'parent',
                 signal: exec.signal,
-                request: { prompt: [{ type: 'text', text: brief }], parent: exec.agent },
+                request: { prompt: [{ type: 'text', text: brief }], parent: exec.agent, ...(preset ? { agentPreset: preset } : {}) },
               });
               envoys.set(childId, { session: String(exec.agent.session?.id ?? '?'), task: String(args.task).trim(), report: '' });
               return `分身 ${childId} 已出发。先回用户一句，继续陪聊；它办完后你会收到汇报。`;
@@ -161,11 +178,26 @@ export function apply(ctx, _config, deps = {}) {
     );
   });
 
+  // 回想（M3 之前的简单版）：按关键词翻原话
+  ctx.inject(['tools'], (c) => {
+    c.effect(() =>
+      c.tools.register(
+        defineTool({
+          name: 'chara_recall',
+          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你们的原话。',
+          parameters: { query: { type: 'string', required: true, description: '关键词，越具体越好，如「猫的名字」写成「猫」' } },
+          output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
+          execute: async (args) => core.recall(args.query),
+        }),
+      ),
+    );
+  });
+
   // 界面挂在 DSH 自带的本机网页服务上；令牌每次启动重新生成，只通过 /chara ui 给出
   const UI_PATH = '/x-chara-soul';
   const token = randomBytes(16).toString('hex');
   ctx.inject(['webServer'], (c) => {
-    c.effect(() => c.webServer.register({ kind: 'prefix', path: UI_PATH, handler: createUiHandler(core, { prefix: UI_PATH, token, onChange: () => sync() }) }));
+    c.effect(() => c.webServer.register({ kind: 'prefix', path: UI_PATH, handler: createUiHandler(core, { prefix: UI_PATH, token, onChange: () => sync(), presets: listPresets }) }));
   });
   const uiLink = () => {
     const port = ctx.get?.('webServer')?.port;
@@ -183,8 +215,8 @@ export function apply(ctx, _config, deps = {}) {
     c.effect(() =>
       c.commands.register({
         name: 'chara',
-        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | show | profile | status | ui',
-        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | show | profile | status | ui' },
+        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | show | reminisce <关键词> | profile | status | ui',
+        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | show | reminisce <关键词> | profile | status | ui' },
         handler: async (inv) => {
           const raw = String(inv.rawInput ?? '').trim();
           if (raw === 'status') return { kind: 'success', text: status(inv) };
@@ -195,6 +227,8 @@ export function apply(ctx, _config, deps = {}) {
           if (raw === 'show' && lastAssembly) {
             const mark = (list, n) => `${n} ${list.includes(n) ? '✓' : '✗'}`;
             text += `\n\n【上次实际组装】\n${mark(lastAssembly.sections, 'chara:nature')}（系统提示）  ${mark(lastAssembly.contexts, 'chara:moment')}（运行时上下文）`;
+            const preset = presetOf(inv.agent);
+            if (preset) text += `\n\n【当前预设】${preset}${preset === OWN_PRESET ? '' : '。人格前缀（deployment:persona-prefix）来自这个预设，可能写着「coding agent」，和本性冲突；陪聊时建议在会话里选「角色灵魂」预设'}`;
             text += `\n\n【其他插件注入的段】\n系统提示：${groupSections(lastAssembly.sections) || '无'}\n运行时上下文：${groupSections(lastAssembly.contexts) || '无'}`;
           }
           return { kind: r.ok ? 'success' : 'error', text };

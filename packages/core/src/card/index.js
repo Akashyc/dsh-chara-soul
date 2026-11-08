@@ -30,7 +30,7 @@ export function readCard(file) {
 
 const q = (s) => YAML.stringify(s).trimEnd();
 /** 一个字段：有内容写成 YAML，空的留 `key: |` 方便用户接着填。 */
-const field = (key, v) => (v?.trim?.() ? YAML.stringify({ [key]: v.trim() }, { lineWidth: 0 }).trimEnd() : `${key}: |`);
+export const field = (key, v) => (v?.trim?.() ? YAML.stringify({ [key]: v.trim() }, { lineWidth: 0 }).trimEnd() : `${key}: |`);
 
 /** 带注释的角色卡文本；新建时只有名字，导入时各字段已填好。 */
 export const cardText = (card, note = '') => `# 角色卡：${card.name}
@@ -46,6 +46,9 @@ ${field('personality', card.personality)}
 
 # 口吻：怎么说话、自称、口头禅
 ${field('speech', card.speech)}
+
+# 和用户的关系：你们是什么关系、怎么走到一起的（每个个体各写各的）
+${field('relationship', card.relationship)}
 
 # 第一次见面说的话
 ${field('first_mes', card.first_mes)}
@@ -70,9 +73,6 @@ name: ${q(name)}
 
 # 希望被怎么称呼
 call_me:
-
-# 和个体的关系
-relationship: |
 
 # 外貌
 appearance: |

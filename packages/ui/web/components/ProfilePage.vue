@@ -6,7 +6,6 @@ import Fields from './Fields.vue';
 const PROFILE = [
   ['name', '你的名字', '', 'input'],
   ['call_me', '希望被怎么称呼', '会写进每个个体的本性', 'input'],
-  ['relationship', '和个体的关系', '', 3],
   ['taboos', '不想被提起的事', '个体会避开这些话题', 3],
   ['likes', '喜欢的东西', '暂不注入，记忆功能上线后使用', 3],
   ['traits', '性格特点', '暂不注入', 3],
@@ -29,7 +28,7 @@ const save = guard(async () => {
 <template>
   <h2>用户画像</h2>
   <div class="panel" style="max-width: 760px">
-    <p class="muted" style="margin-top: 0">所有个体共享。写你希望它们知道的自己；名字、称呼、关系、忌讳会进入本性。</p>
+    <p class="muted" style="margin-top: 0">所有个体共享。写你希望它们知道的自己；名字、称呼、忌讳会进入本性；和每个个体的关系写在各自的角色卡里。</p>
     <Fields v-model="form" :spec="PROFILE" />
     <div class="actions"><button class="btn primary" type="button" @click="save">保存</button></div>
   </div>

@@ -83,6 +83,16 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal((await call('POST', '/api/use', { id: tian.id })).status, 200);
     assert.match((await call('GET', '/api/state')).data.show, /天音/);
     assert.ok(changes >= 5);
+
+    const s = (await call('GET', '/api/settings')).data;
+    assert.equal(s.envoyPreset, 'standard');
+    assert.equal(s.presets, null, '拿不到预设列表时界面退回文本框');
+    assert.equal(s.home.source, 'env', '没有指向文件的核心不能换目录');
+    assert.equal((await call('PUT', '/api/settings', { envoyPreset: 'ptc' })).status, 200);
+    assert.equal((await call('GET', '/api/settings')).data.envoyPreset, 'ptc');
+    assert.equal((await call('PUT', '/api/settings', { envoyPreset: '../x' })).status, 400);
+    assert.match((await call('POST', '/api/home', { to: path.join(home, '..', '别处') })).data.error, /环境变量/);
+    assert.equal((await call('DELETE', '/api/home')).status, 400);
   } finally {
     server.close();
     core.close();

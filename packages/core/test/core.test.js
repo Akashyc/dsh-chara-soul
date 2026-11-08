@@ -251,3 +251,107 @@ test('M6：导入酒馆 V2 JSON 与 V3 PNG，世界书进 lorebook，模型指�
     assert.equal((core.command('list').text.match(/b-/g) ?? []).length, 2, '失败的导入不留下个体');
   });
 });
+
+test('回想：按关键词翻当前个体的原话，个体之间不相通', () =>
+  withHome(({ core, tick }) => {
+    assert.match(core.recall('猫'), /还没有个体/);
+    core.command('new 甲');
+    core.afterTurn({ session: 's', role: 'user', text: '我家的猫叫团子', tz: 'Asia/Shanghai' });
+    tick(MIN);
+    core.afterTurn({ session: 's', role: 'assistant', text: '团子这个名字真可爱' });
+    core.afterTurn({ session: 's', role: 'user', text: '今天下雨了' });
+    assert.match(core.recall('团子'), /2026\/11\/7 23:58 用户：我家的猫叫团子\n.*你：团子这个名字真可爱/, '两个字走逐行匹配，按时间排');
+    assert.match(core.recall('猫叫团'), /我家的猫叫团子/, '三个字走全文索引');
+    assert.match(core.recall('狗'), /没有找到/);
+    assert.match(core.command('reminisce 下雨').text, /今天下雨了/);
+    core.command('new 乙');
+    assert.match(core.recall('团子'), /没有找到/, '乙不知道甲的事');
+  }));
+
+test('换数据目录：搬过去照常用、写指向文件、旧目录不动；各种拒绝；删旧目录', () => {
+  const root = mkdtempSync(path.join(tmpdir(), '迁移 测试 '));
+  const old = path.join(root, '旧');
+  const pointer = path.join(root, '默认', 'home.json');
+  let core = createCore({ home: old, host: 'test', pointer });
+  try {
+    core.command('new 甲');
+    core.afterTurn({ session: 's', role: 'user', text: '我家的猫叫团子' });
+    core.view.saveSettings({ envoyPreset: 'ptc' });
+
+    assert.throws(() => core.moveHome('相对路径'), /完整的目录路径/);
+    assert.throws(() => core.moveHome(old), /已经是这个目录/);
+    assert.throws(() => core.moveHome(path.join(old, '子')), /不能在旧目录里面/);
+    mkdirSync(path.join(root, '满'));
+    writeFileSync(path.join(root, '满', 'x.txt'), 'x');
+    assert.throws(() => core.moveHome(path.join(root, '满')), /已有东西/);
+    assert.equal(core.home, old, '拒绝之后还在旧目录');
+    assert.match(core.recall('团子'), /我家的猫叫团子/, '拒绝之后库照样能用');
+
+    const dest = path.join(root, '新 目录');
+    const info = core.moveHome(dest);
+    assert.equal(info.home, dest);
+    assert.equal(info.previous, old);
+    assert.equal(core.home, dest);
+    assert.deepEqual(JSON.parse(readFileSync(pointer, 'utf8')), { home: dest, previous: old });
+    assert.match(core.recall('团子'), /我家的猫叫团子/, '新位置上原话还在');
+    assert.equal(core.view.settings().envoyPreset, 'ptc', '名册设置也搬过来了');
+    core.afterTurn({ session: 's', role: 'user', text: '搬家以后的话' });
+    assert.ok(existsSync(path.join(old, 'roster.db')), '旧目录不自动删');
+
+    core.close();
+    core = createCore({ home: old, host: 'test' });
+    assert.match(core.recall('搬家'), /没有找到/, '新写的话只在新目录');
+    assert.throws(() => core.moveHome(path.join(root, '再')), /环境变量/, '没有指向文件时不能换');
+    core.close();
+
+    core = createCore({ home: dest, host: 'test', pointer });
+    core.removeOldHome();
+    assert.ok(!existsSync(old), '旧目录里只有搬走过的数据，删完连目录一起删');
+    assert.equal(core.homeInfo().previous, null);
+    assert.throws(() => core.removeOldHome(), /没有可删的旧目录/);
+  } finally {
+    core.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('关系：每个个体各写一份；旧画像里的关系搬给当前个体并从画像里去掉', () => {
+  const home = mkdtempSync(path.join(tmpdir(), '关系 '));
+  let core = createCore({ home, host: 'test' });
+  try {
+    core.command('new 甲');
+    const a = core.view.beings()[0].id;
+    core.command('new 乙');
+    core.command(`use ${a}`);
+    // 模拟旧版本：关系写在画像里，甲的卡是旧模板、没有 relationship 这一项
+    const cardA = path.join(home, 'beings', a, 'card.yaml');
+    writeFileSync(cardA, '# 我自己的注释\nname: 甲\n');
+    mkdirSync(path.join(home, 'profiles'), { recursive: true });
+    writeFileSync(path.join(home, 'profiles', 'default.yaml'), 'name: 小明\nrelationship: 捡回家的好心人\n');
+    core.close();
+
+    core = createCore({ home, host: 'test' });
+    assert.match(core.nature(), /你们的关系：捡回家的好心人/, '搬给当前个体');
+    assert.equal(core.view.profile().relationship, undefined, '画像里去掉了');
+    assert.equal(core.view.profile().name, '小明', '画像其余字段还在');
+    assert.match(readFileSync(cardA, 'utf8'), /^# 我自己的注释\nname: 甲\n[\s\S]*从用户画像搬过来的/, '旧卡追加在末尾，原注释保留');
+
+    core.command('use 乙');
+    assert.doesNotMatch(core.nature(), /你们的关系/, '别的个体不受影响');
+
+    // 乙是新模板，卡里有空的 relationship: |，就地填进去
+    writeFileSync(path.join(home, 'profiles', 'default.yaml'), 'name: 小明\nrelationship: 多年的老朋友\n');
+    core.close();
+    core = createCore({ home, host: 'test' });
+    assert.match(core.nature(), /你们的关系：多年的老朋友/);
+    const b = core.view.beings().find((x) => x.name === '乙').id;
+    const cardB = readFileSync(path.join(home, 'beings', b, 'card.yaml'), 'utf8');
+    assert.match(cardB, /# 角色卡：乙[\s\S]*# 和用户的关系[^\n]*\nrelationship: 多年的老朋友\n/, '填在原位，注释保留');
+    assert.doesNotMatch(cardB, /从用户画像搬过来的/);
+    core.command(`use ${a}`);
+    assert.match(core.nature(), /你们的关系：捡回家的好心人/, '两个个体各是各的');
+  } finally {
+    core.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});

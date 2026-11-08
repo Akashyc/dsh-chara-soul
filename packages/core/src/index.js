@@ -1,25 +1,31 @@
 // 核心入口：不依赖任何宿主。适配器与 cli 都只通过这里访问（架构方案第四节）。
 import path from 'node:path';
-import { statSync, existsSync, readFileSync, copyFileSync, writeFileSync, rmSync } from 'node:fs';
+import { statSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import YAML from 'yaml';
-import { dataHome, ensureHome } from './store/index.js';
+import { dataHome, ensureHome, pointerFile, readPointer, writePointer, syncFolderWarning, copyHome, isEmptyTarget, homeEntries } from './store/index.js';
 import { openRoster } from './roster/index.js';
-import { readCard, readYaml, writeText, validateCard, cardText, cardTemplate, profileTemplate } from './card/index.js';
+import { readCard, readYaml, writeText, validateCard, cardText, cardTemplate, profileTemplate, field } from './card/index.js';
 import { readTavernJson, fromTavern } from './card/tavern.js';
 import { buildNature, buildBrief } from './nature/index.js';
 import { floor5, zone, timeLines, daysBetween, relative } from './chrono/index.js';
 import { openLife } from './memory/life.js';
 
 const mtime = (f) => (existsSync(f) ? statSync(f).mtimeMs : 0);
-const CARD_FIELDS = ['name', 'appearance', 'personality', 'speech', 'first_mes', 'mes_example'];
-const PROFILE_FIELDS = ['name', 'call_me', 'relationship', 'appearance', 'traits', 'likes', 'taboos'];
+const CARD_FIELDS = ['name', 'appearance', 'personality', 'speech', 'relationship', 'first_mes', 'mes_example'];
+const PROFILE_FIELDS = ['name', 'call_me', 'appearance', 'traits', 'likes', 'taboos'];
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => typeof o?.[k] === 'string').map((k) => [k, o[k]]));
 
 /**
  * home：数据目录；now：时钟（测试可注入）；host：写进原话的来源宿主名。
+ * pointer：指向文件路径，换数据目录时写它；为 null 时不能换（环境变量指定了目录，或测试里没给）。
+ * 不传 home 时按「环境变量 → 指向文件 → 默认位置」找目录，指向文件用默认位置下的那份。
  */
-export function createCore({ home = ensureHome(dataHome()), now = Date.now, host = 'unknown' } = {}) {
-  const roster = openRoster(home, now);
+export function createCore({ home, now = Date.now, host = 'unknown', pointer = null } = {}) {
+  if (home === undefined) {
+    home = ensureHome(dataHome());
+    pointer = process.env.CHARA_SOUL_HOME ? null : pointerFile();
+  }
+  let roster = openRoster(home, now);
   const beingDir = (id) => path.join(home, 'beings', id);
   const cardFile = (id) => path.join(beingDir(id), 'card.yaml');
   // 头像（avatar）和形象图（portrait）都存成 <kind>.png/jpg/webp，没有时退回导入时留下的 source.png
@@ -82,6 +88,24 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
     c.life.setMeta('prev_user_at', c.life.meta('last_user_at'));
     c.life.setMeta('last_user_at', at);
     if (tz) c.life.setMeta('tz', tz);
+  }
+
+  /**
+   * 回想：按关键词翻当前个体的原话。shortcut: 只搜原话、不提取记忆点，M3 记忆点上线后改为先查记忆点。
+   * @param query 关键词，不足三个字时退化为逐行匹配
+   * @returns 每条一行「时间 谁：原话」，太长的截断；没有个体或没找到时给出说明
+   */
+  function recall(query) {
+    const c = current();
+    if (!c) return '还没有个体，没有可回想的。';
+    const q = String(query ?? '').trim();
+    if (!q) return '要回想什么？给一个关键词。';
+    const tz = zone(c.life.meta('tz'));
+    const when = new Intl.DateTimeFormat('zh-CN', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    const rows = c.life.searchTurns(q);
+    if (!rows.length) return `原话里没有找到「${q}」。`;
+    const cut = (t) => ([...t].length > 200 ? `${[...t].slice(0, 200).join('')}…` : t);
+    return rows.map((r) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${cut(r.text.replace(/\s+/g, ' '))}`).join('\n');
   }
 
   /** 分身的简报。没有个体或没有任务时返回空串。 */
@@ -155,12 +179,13 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
       if (!c) return ok('还没有个体，本轮不注入任何内容。');
       return ok([`【本性】\n${c.nature}`, `【此刻】\n${moment(false)}`, c.error ? `⚠ 角色卡读取出错，仍在用上一版：${c.error}` : ''].filter(Boolean).join('\n\n'));
     },
+    reminisce: (q) => ok(recall(q)),
     profile() {
       const f = profileFile();
       if (!existsSync(f)) writeText(f, profileTemplate());
       return ok(`用户画像在 ${f}，编辑保存后下一轮生效。`);
     },
-    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | show | profile'),
+    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | show | reminisce <关键词> | profile'),
   };
 
   /** 用户命令。raw 是子命令及参数的原文，如 "use 蒂普茜柯"。 */
@@ -228,6 +253,13 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
 
 ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
     },
+    /** 设置（005 号决定）：envoyPreset 是本体在「角色灵魂」预设下时，派分身用的全量预设。 */
+    settings: () => ({ envoyPreset: roster.getState('envoy_preset') ?? 'standard' }),
+    saveSettings({ envoyPreset } = {}) {
+      const id = String(envoyPreset ?? '').trim();
+      if (!/^[\w.-]+$/.test(id)) throw new Error('预设 id 只能是字母、数字、点、横线、下划线');
+      roster.setState('envoy_preset', id);
+    },
     imageFile: (id, kind) => imageOf(known(id), imageKind(kind)),
     /** 换头像或形象图：认文件头，只收 PNG、JPG、WebP；导入时留下的 source.png 不动 */
     saveImage(id, kind, buf) {
@@ -238,10 +270,113 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
     },
   };
 
+  /** 关掉所有库；先做检查点，把 WAL 里的写入并回主文件，复制主文件就是完整数据。 */
   function close() {
-    for (const b of open.values()) b.life.close();
+    for (const b of open.values()) {
+      b.life.store.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      b.life.close();
+    }
+    open.clear();
+    roster.store.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     roster.close();
   }
 
-  return { nature, moment, afterTurn, envoyBrief, envoyReport, command, view, close, home };
+  const same = (a, b) => path.relative(a, b) === '';
+  const inside = (child, parent) => {
+    const r = path.relative(parent, child);
+    return r !== '' && !r.startsWith('..') && !path.isAbsolute(r);
+  };
+
+  /** 数据目录的现状，给设置页：在哪、由谁决定、旧目录还在不在、在不在网盘里。 */
+  function homeInfo() {
+    const previous = pointer ? readPointer(pointer)?.previous : null;
+    return {
+      home,
+      source: !pointer ? 'env' : readPointer(pointer) ? 'pointer' : 'default',
+      previous: previous && !same(previous, home) && existsSync(path.join(previous, 'roster.db')) ? previous : null,
+      warning: syncFolderWarning(home),
+    };
+  }
+
+  /**
+   * 把数据目录搬到 to（005 号决定第 6 条）：关库 → 复制 → 核对 → 改指向文件 → 在新位置重新打开。
+   * 任何一步失败都在旧位置重新打开并抛错，旧目录原样不动；旧目录不自动删。
+   * @param to 新目录，必须为空或不存在，不能和旧目录互相包含
+   * @returns 新的数据目录现状；warning 非空表示新目录在网盘同步文件夹里
+   */
+  function moveHome(to) {
+    if (!pointer) throw new Error('数据目录由环境变量 CHARA_SOUL_HOME 指定，不能在这里改');
+    const raw = String(to ?? '').trim();
+    if (!raw || !path.isAbsolute(raw)) throw new Error('请填写完整的目录路径，如 D:\\灵魂');
+    const dest = path.resolve(raw);
+    if (same(dest, home)) throw new Error('已经是这个目录');
+    if (inside(dest, home) || inside(home, dest)) throw new Error('新目录不能在旧目录里面，也不能包含旧目录');
+    if (!isEmptyTarget(dest)) throw new Error(`目标目录 ${dest} 里已有东西；不合并数据，请选一个空目录`);
+
+    const from = home;
+    close();
+    try {
+      // 别的程序（npx chara ui、另一个 DSH）还开着库时，Windows 上改名会失败，借此拒绝迁移
+      // shortcut: macOS / Linux 上改名不受打开的文件影响，查不出来；要可靠就得加锁文件
+      const db = path.join(from, 'roster.db');
+      renameSync(db, `${db}.moving`);
+      renameSync(`${db}.moving`, db);
+    } catch (e) {
+      roster = openRoster(home, now);
+      throw new Error(`数据库被别的程序占着（可能是 npx chara ui 或另一个 DSH），关掉后再迁移（${e.code ?? e.message}）`);
+    }
+    try {
+      copyHome(from, dest);
+    } catch (e) {
+      roster = openRoster(home, now);
+      throw new Error(`迁移失败，旧目录没动：${e.message}`);
+    }
+    writePointer(pointer, { home: dest, previous: from });
+    home = dest;
+    roster = openRoster(home, now);
+    return homeInfo();
+  }
+
+  /** 删掉迁移后留下的旧目录里的数据（只删搬走过的那些项，旧目录里别的东西和指向文件不碰）。 */
+  function removeOldHome() {
+    const info = homeInfo();
+    if (!info.previous) throw new Error('没有可删的旧目录');
+    const moved = new Set(homeEntries(home));
+    for (const n of homeEntries(info.previous)) if (moved.has(n) || /^roster\.db-(wal|shm)$/.test(n)) rmSync(path.join(info.previous, n), { recursive: true, force: true });
+    if (!readdirSync(info.previous).length) rmSync(info.previous, { recursive: true, force: true });
+    writePointer(pointer, { home });
+  }
+
+  /**
+   * 关系原来写在画像里、所有个体共用；现在每个个体在角色卡里各写一份。
+   * 旧画像里的关系搬给当前个体（它的卡里还没写时），再从画像里去掉。只改卡里这一项，不动用户的注释：
+   * 新模板里有空的 `relationship: |` 就填进去，旧卡里没有这一项就追加在末尾。
+   */
+  function moveLegacyRelationship() {
+    const profile = readYaml(profileFile());
+    const legacy = typeof profile?.relationship === 'string' ? profile.relationship.trim() : '';
+    const cur = roster.current();
+    if (!legacy || !cur || !alive(cur.id)) return;
+    const file = cardFile(cur.id);
+    const card = readCard(file);
+    if (!card.relationship?.trim?.()) {
+      const text = readFileSync(file, 'utf8');
+      const empty = /^relationship:[ \t]*\|?[ \t]*$/m;
+      if (empty.test(text)) writeFileSync(file, text.replace(empty, field('relationship', legacy)));
+      else if (!('relationship' in card)) appendFileSync(file, `\n# 和用户的关系（从用户画像搬过来的）\n${field('relationship', legacy)}\n`);
+      else return; // 写法特殊（如 relationship: ""），不冒险改，留在画像里
+    }
+    view.saveProfile(profile);
+  }
+
+  try {
+    moveLegacyRelationship();
+  } catch {} // 卡或画像读不了时不搬，不影响启动；本性那边会报出具体错误
+
+  return {
+    nature, moment, afterTurn, recall, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
+    get home() {
+      return home;
+    },
+  };
 }

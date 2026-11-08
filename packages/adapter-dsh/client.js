@@ -137,7 +137,7 @@ window.__ModuleLoader__.load({
 
             return h('div', { className: 'chara-panel', style: S.root },
                 h('div', { style: S.bar },
-                    h('span', { style: S.grow }, '角色灵魂'),
+                    h('span', { style: S.grow }, '灵魂狭间'),
                     h('button', { type: 'button', style: S.btn, onClick: reload, title: '重新载入界面' }, '刷新'),
                     h('button', { type: 'button', style: S.btn, onClick: detach, title: '在新窗口打开（界面里所有功能都能用）' }, '新窗口'),
                 ),
@@ -146,7 +146,7 @@ window.__ModuleLoader__.load({
                         ? h('iframe', {
                             ref: frameRef,
                             src: url,
-                            title: '角色灵魂',
+                            title: '灵魂狭间',
                             style: S.frame,
                             onLoad: function () {
                                 const win = frameRef.current && frameRef.current.contentWindow
@@ -192,7 +192,7 @@ window.__ModuleLoader__.load({
                         return ctx.slots.inject('sidebar.panellist', function () {
                             const stopMain = ctx.slots.register({ name: 'main', key: PANEL_KEY }, SoulPanel)
                             const stopIcon = ctx.slots.register(
-                                { name: 'sidebar.panellist', id: PANEL_KEY, order: 30, label: '角色灵魂' },
+                                { name: 'sidebar.panellist', id: PANEL_KEY, order: 30, label: '灵魂狭间' },
                                 SoulIcon,
                             )
                             return function () {

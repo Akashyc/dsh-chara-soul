@@ -25,8 +25,9 @@ function readBody(req) {
 /**
  * core：createCore() 的返回值；prefix：挂载路径（DSH 里是 /x-chara-soul，独立运行时为空）；
  * token：访问令牌；onChange：新建、切换、导入、改卡之后调用（DSH 适配器用它重新登记注入段）。
+ * presets：列出宿主已注册预设的函数（DSH 适配器提供），没有时设置页退回文本框。
  */
-export function createUiHandler(core, { prefix = '', token, onChange = () => {} }) {
+export function createUiHandler(core, { prefix = '', token, onChange = () => {}, presets = async () => null }) {
   if (!token) throw new Error('界面需要访问令牌');
   return async (req, res) => {
     const send = (code, body, type = 'application/json; charset=utf-8') => {
@@ -65,12 +66,17 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {} 
       }
       if (is('GET', '/api/card')) return send(200, core.view.card(q('id')));
       if (is('GET', '/api/profile')) return send(200, core.view.profile());
+      if (is('GET', '/api/settings')) return send(200, { ...core.view.settings(), presets: await presets().catch(() => null), home: core.homeInfo() });
       if (!headerOk) return send(403, { error: '写操作需要请求头令牌' });
 
       if (is('POST', '/api/preview')) return send(200, core.view.preview(await json()));
       if (is('PUT', '/api/card')) return core.view.saveCard(q('id'), await json()), onChange(), send(200, { ok: true });
       if (image && req.method === 'PUT') return core.view.saveImage(q('id'), image, await readBody(req)), send(200, { ok: true });
       if (is('PUT', '/api/profile')) return core.view.saveProfile(await json()), onChange(), send(200, { ok: true });
+      if (is('PUT', '/api/settings')) return core.view.saveSettings(await json()), send(200, { ok: true });
+      // 换数据目录之后本性要从新位置读，所以也调 onChange
+      if (is('POST', '/api/home')) return send(200, core.moveHome((await json()).to)), onChange();
+      if (is('DELETE', '/api/home')) return core.removeOldHome(), send(200, { ok: true });
       if (is('POST', '/api/new')) return done(core.command(`new ${String((await json()).name ?? '').trim()}`));
       if (is('POST', '/api/use')) return done(core.command(`use ${String((await json()).id ?? '').trim()}`));
       if (is('POST', '/api/import')) {

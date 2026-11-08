@@ -1,6 +1,6 @@
 // 一个个体的一生：life.db。原话、少量元数据与分身汇报；记忆点等表在 M3 以新的迁移步骤加入。
 import path from 'node:path';
-import { openDb, migrate, ftsIndex } from '../store/index.js';
+import { openDb, migrate, ftsIndex, search } from '../store/index.js';
 
 const STEPS = [
   `CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -43,6 +43,8 @@ export function openLife(dir) {
     /** 同一个分身重复结算时保留最新的汇报。 */
     appendEnvoy: ({ id, session, task, report, at, host }) =>
       db.prepare('INSERT INTO envoys (id, session, task, report, at, host) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET report = excluded.report, at = excluded.at').run(id, session, task, report, at, host),
+    /** 按关键词翻原话（M3 之前的简单回想）。返回最相关的 limit 条，按时间先后排。 */
+    searchTurns: (query, limit = 8) => search(store, 'turns', 'text', query, limit).sort((a, b) => a.at - b.at),
     turnCount: () => db.prepare('SELECT count(*) n FROM turns').get().n,
     close: () => db.close(),
   };

@@ -130,6 +130,20 @@ test('分身：chara_envoy 派出带底线的简报，结算时把任务与汇�
     assert.deepEqual(db.prepare('SELECT text FROM turns').all().map((r) => r.text), ['帮我修个 bug'], '分身的话和结算通知都不进原话');
     db.close();
 
+    assert.equal(sent[0].request.agentPreset, undefined, '没有预设服务时让分身继承');
+    let mine = 'chara-soul';
+    services.agentPresets = { composedPreset: (c) => (c === exec.agent.ctx ? mine : undefined) };
+    exec.agent.ctx = {};
+    await envoy.execute({ task: '查资料' }, exec);
+    assert.equal(sent[1].request.agentPreset, 'standard', '本体在角色灵魂预设下，分身默认用 standard');
+    core.view.saveSettings({ envoyPreset: 'flash-lean-ptc-v3' });
+    await envoy.execute({ task: '查资料' }, exec);
+    assert.equal(sent[2].request.agentPreset, 'flash-lean-ptc-v3', '按设置里的预设派');
+    mine = 'ptc';
+    await envoy.execute({ task: '查资料' }, exec);
+    assert.equal(sent[3].request.agentPreset, undefined, '别的预设本来就是全量的，让分身继承');
+    assert.throws(() => core.view.saveSettings({ envoyPreset: 'a b' }), /预设 id/);
+
     services.subagents = { startActivation: async () => { throw Object.assign(new Error('满了'), { code: 'ACTIVATION_LIMIT_REACHED' }); } };
     assert.match(await envoy.execute({ task: '再修一个' }, exec), /ACTIVATION_LIMIT_REACHED.*自己把事办完/);
   } finally {
