@@ -21,8 +21,10 @@ const clip = (s, n) => {
  * 组装本性。card 是角色卡（含这个个体和用户的关系），profile 是用户画像（可空）。
  * 超出 budget 时按优先级从低到高裁剪：外貌 → 用户画像 → 口吻 → 性格；名字与底线不裁。
  * 外貌不在架构方案 10.1 的清单里，但它决定动作描写（甩尾巴、吐泡泡），预算够时保留。
+ * global 是用户写的全局提示词，对每个个体都生效：排在人设之后、底线之前，
+ * 这样能压过人设里的同类要求，却越不过底线；它不占预算也不裁，长短由用户自己把握。
  */
-export function buildNature(card, profile = null, budget = 2000) {
+export function buildNature(card, profile = null, budget = 2000, global = '') {
   // 关系写在角色卡里，每个个体各一份；名字、称呼、忌讳来自所有个体共享的画像
   const user = [
     text(profile?.name) && `用户的名字：${text(profile.name)}`,
@@ -55,7 +57,8 @@ export function buildNature(card, profile = null, budget = 2000) {
       room = 0;
     }
   }
-  return [head, ...kept, BOTTOM_LINES, ENVOY_HINT].join('\n\n');
+  const g = text(global);
+  return [head, ...kept, g && `【全局要求】\n${g}`, BOTTOM_LINES, ENVOY_HINT].filter(Boolean).join('\n\n');
 }
 
 /**

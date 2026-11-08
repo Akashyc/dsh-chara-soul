@@ -80,6 +80,13 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal((await call('PUT', '/api/profile', { call_me: '老板', evil: 'x' })).status, 200);
     assert.deepEqual((await call('GET', '/api/profile')).data, { call_me: '老板' });
 
+    const before = (await call('POST', '/api/preview', { name: '小鲸', personality: '温柔' })).data;
+    assert.equal((await call('PUT', '/api/global', { text: '不要用 Markdown' })).status, 200);
+    assert.equal((await call('GET', '/api/global')).data.text, '不要用 Markdown');
+    const after = (await call('POST', '/api/preview', { name: '小鲸', personality: '温柔' })).data;
+    assert.ok(after.nature.indexOf('温柔') < after.nature.indexOf('【全局要求】\n不要用 Markdown') && after.nature.indexOf('不要用 Markdown') < after.nature.indexOf('你的底线'), '人设 → 全局 → 底线');
+    assert.equal(after.length, before.length, '全局提示词不占预算');
+
     const json = JSON.stringify({ spec: 'chara_card_v2', data: { name: '天音', description: '温柔', first_mes: '你好' } });
     assert.equal((await call('POST', '/api/import?name=a.json', json)).status, 200);
     assert.equal((await call('POST', '/api/import?name=a.exe', 'x')).status, 400);

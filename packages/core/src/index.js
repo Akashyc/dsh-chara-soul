@@ -37,6 +37,8 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     return kind;
   };
   const profileFile = () => path.join(home, 'profiles', `${roster.getState('profile') ?? 'default'}.yaml`);
+  const globalFile = () => path.join(home, 'global.md'); // 全局提示词，所有个体共用，不随画像切换
+  const readGlobal = () => (existsSync(globalFile()) ? readFileSync(globalFile(), 'utf8') : '');
   const userAvatars = () => imageNames(profileFile().replace(/\.yaml$/, '.avatar')); // 用户头像跟画像放一起：profiles/<画像>.avatar.png
   // 认文件头，只收 PNG、JPG、WebP
   const imageExt = (buf) => {
@@ -53,13 +55,13 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     if (!open.has(id)) open.set(id, { life: openLife(beingDir(id)), nature: '', stamp: '', error: null });
     const b = open.get(id);
     // 角色卡或画像改过就重建本性；改坏了保留上一版并记下错误，不让整轮失败
-    const stamp = `${mtime(cardFile(id))}|${mtime(profileFile())}`;
+    const stamp = `${mtime(cardFile(id))}|${mtime(profileFile())}|${mtime(globalFile())}`;
     if (stamp !== b.stamp) {
       b.stamp = stamp;
       try {
         const card = readCard(cardFile(id));
         if (card.name !== roster.get(id).name) roster.rename(id, card.name);
-        b.nature = buildNature(card, readYaml(profileFile()));
+        b.nature = buildNature(card, readYaml(profileFile()), 2000, readGlobal());
         b.error = null;
       } catch (e) {
         b.error = e.message;
@@ -250,9 +252,11 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     /** 未保存的表单拼出来的本性，以及哪些字段被预算截掉。 */
     preview(fields) {
       const card = pick(fields, CARD_FIELDS);
-      const text = buildNature({ ...card, name: card.name?.trim() || '（未命名）' }, readYaml(profileFile()));
+      const g = readGlobal().trim();
+      const text = buildNature({ ...card, name: card.name?.trim() || '（未命名）' }, readYaml(profileFile()), 2000, g);
       const cut = ['personality', 'speech', 'appearance'].filter((k) => card[k]?.trim() && !text.includes(card[k].trim()));
-      return { nature: text, length: [...text].length, budget: 2000, cut };
+      // 全局提示词不占预算，字数里扣掉它（标题、换行和前后空行共 9 字）
+      return { nature: text, length: [...text].length - (g ? [...g].length + 9 : 0), budget: 2000, cut };
     },
     profile: () => readYaml(profileFile()) ?? {},
     saveProfile(fields) {
@@ -260,6 +264,8 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
 
 ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
     },
+    global: () => ({ text: readGlobal() }),
+    saveGlobal: ({ text } = {}) => writeText(globalFile(), typeof text === 'string' ? text : ''),
     /** 设置（005 号决定）：envoyPreset 是本体在自带预设（闲谈陪伴、全能女仆）下时，派分身用的预设。 */
     settings: () => ({ envoyPreset: roster.getState('envoy_preset') ?? 'chara-soul-envoy' }), // 默认用插件自带的分身预设
     saveSettings({ envoyPreset } = {}) {
