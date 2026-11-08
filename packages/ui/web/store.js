@@ -15,7 +15,8 @@ export async function api(method, route, body, raw) {
   return data;
 }
 
-export const avatarUrl = (b) => `${base}/api/avatar?id=${encodeURIComponent(b.id)}&t=${encodeURIComponent(token)}&v=${b.avatar}`;
+/** 头像或形象图的地址；kind 是 avatar 或 portrait，v 带修改时间让换图后不吃缓存。 */
+export const avatarUrl = (b, kind = 'avatar') => `${base}/api/${kind}?id=${encodeURIComponent(b.id)}&t=${encodeURIComponent(token)}&v=${b[kind]}`;
 
 export const state = reactive({ beings: [], show: '', tab: 'beings', toast: null, tint: {} });
 export const current = computed(() => state.beings.find((b) => b.current));

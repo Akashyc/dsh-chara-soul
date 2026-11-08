@@ -22,8 +22,14 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
   const roster = openRoster(home, now);
   const beingDir = (id) => path.join(home, 'beings', id);
   const cardFile = (id) => path.join(beingDir(id), 'card.yaml');
-  const AVATARS = ['avatar.png', 'avatar.jpg', 'avatar.webp'];
-  const avatarOf = (id) => [...AVATARS, 'source.png'].map((f) => path.join(beingDir(id), f)).find((f) => existsSync(f)) ?? null;
+  // 头像（avatar）和形象图（portrait）都存成 <kind>.png/jpg/webp，没有时退回导入时留下的 source.png
+  const IMAGE_KINDS = ['avatar', 'portrait'];
+  const imageNames = (kind) => ['png', 'jpg', 'webp'].map((ext) => `${kind}.${ext}`);
+  const imageOf = (id, kind) => [...imageNames(kind), 'source.png'].map((f) => path.join(beingDir(id), f)).find((f) => existsSync(f)) ?? null;
+  const imageKind = (kind) => {
+    if (!IMAGE_KINDS.includes(kind)) throw new Error(`没有这种图片：${kind}`);
+    return kind;
+  };
   const profileFile = () => path.join(home, 'profiles', `${roster.getState('profile') ?? 'default'}.yaml`);
   const open = new Map(); // id → { life, nature, stamp, error }
   // 用户手动删掉个体文件夹时，名册行还在：只认角色卡还在的，也不替它重建文件夹（004 号决定：名册行不删）
@@ -196,7 +202,8 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
           lastSeen: last == null ? null : relative(now() - last),
           first_mes: card.first_mes ?? '',
           lorebook: Array.isArray(card.lorebook) ? card.lorebook.length : 0,
-          avatar: avatarOf(r.id) ? statSync(avatarOf(r.id)).mtimeMs : 0, // 修改时间，页面拿来刷新缓存
+          avatar: imageOf(r.id, 'avatar') ? statSync(imageOf(r.id, 'avatar')).mtimeMs : 0, // 修改时间，页面拿来刷新缓存
+          portrait: imageOf(r.id, 'portrait') ? statSync(imageOf(r.id, 'portrait')).mtimeMs : 0,
           error: b.error,
         };
       });
@@ -221,13 +228,13 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
 
 ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
     },
-    avatarFile: (id) => avatarOf(known(id)),
-    /** 换头像：认文件头，只收 PNG、JPG、WebP；导入时留下的 source.png 不动 */
-    saveAvatar(id, buf) {
+    imageFile: (id, kind) => imageOf(known(id), imageKind(kind)),
+    /** 换头像或形象图：认文件头，只收 PNG、JPG、WebP；导入时留下的 source.png 不动 */
+    saveImage(id, kind, buf) {
       const ext = buf.subarray(0, 4).toString('hex') === '89504e47' ? 'png' : buf.subarray(0, 3).toString('hex') === 'ffd8ff' ? 'jpg' : buf.subarray(8, 12).toString() === 'WEBP' ? 'webp' : '';
       if (!ext) throw new Error('只支持 PNG、JPG、WebP 图片');
-      for (const f of AVATARS) rmSync(path.join(beingDir(known(id)), f), { force: true });
-      writeFileSync(path.join(beingDir(id), `avatar.${ext}`), buf);
+      for (const f of imageNames(imageKind(kind))) rmSync(path.join(beingDir(known(id)), f), { force: true });
+      writeFileSync(path.join(beingDir(id), `${kind}.${ext}`), buf);
     },
   };
 

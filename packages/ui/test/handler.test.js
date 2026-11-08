@@ -63,6 +63,12 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal(av.headers.get('content-type'), 'image/jpeg');
     assert.deepEqual(new Uint8Array(await av.arrayBuffer()), jpg);
     assert.ok((await call('GET', '/api/state')).data.beings[0].avatar > 0);
+    assert.equal((await call('GET', '/api/state')).data.beings[0].portrait, 0, '形象图和头像分开存');
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9]);
+    assert.equal((await call('PUT', `/api/portrait?id=${b.id}`, png)).status, 200);
+    const pt = await fetch(`${base}/api/portrait?id=${b.id}&t=tk`);
+    assert.equal(pt.headers.get('content-type'), 'image/png');
+    assert.equal((await fetch(`${base}/api/avatar?id=${b.id}&t=tk`)).headers.get('content-type'), 'image/jpeg', '头像没被覆盖');
 
     assert.equal((await call('PUT', '/api/profile', { call_me: '老板', evil: 'x' })).status, 200);
     assert.deepEqual((await call('GET', '/api/profile')).data, { call_me: '老板' });

@@ -1,7 +1,8 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue';
-import { state, current, api, load, toast, guard } from '../store.js';
+import { state, current, api, load, toast, guard, avatarUrl } from '../store.js';
 import Avatar from './Avatar.vue';
+import AvatarCrop from './AvatarCrop.vue';
 import Fields from './Fields.vue';
 
 const CARD = [
@@ -40,13 +41,45 @@ const save = guard(async () => {
 });
 
 const file = ref(null);
-const changeAvatar = guard(async () => {
+const cropSrc = ref(''); // 正在裁剪的图片地址，空串表示弹窗没开
+
+/** 选好文件后先打开裁剪弹窗，不直接上传。 */
+function pickAvatar() {
   const f = file.value.files[0];
+
   file.value.value = '';
-  if (!f) return;
-  await api('PUT', `avatar?id=${encodeURIComponent(editing.value)}`, await f.arrayBuffer(), true);
+  if (f) cropSrc.value = URL.createObjectURL(f);
+}
+
+/** 关掉裁剪弹窗，释放本地图片占的内存。 */
+function closeCrop() {
+  URL.revokeObjectURL(cropSrc.value);
+  cropSrc.value = '';
+}
+
+/**
+ * 上传裁好的头像，刷新列表后关掉弹窗。
+ * @param blob 裁剪弹窗导出的正方形图片
+ */
+const saveAvatar = guard(async (blob) => {
+  await api('PUT', `avatar?id=${encodeURIComponent(editing.value)}`, await blob.arrayBuffer(), true);
+  closeCrop();
   await load();
   toast('头像已更换');
+});
+
+const portraitFile = ref(null);
+const viewer = ref(null);
+
+/** 选好形象图直接上传，原图不裁不压。 */
+const savePortrait = guard(async () => {
+  const f = portraitFile.value.files[0];
+
+  portraitFile.value.value = '';
+  if (!f) return;
+  await api('PUT', `portrait?id=${encodeURIComponent(editing.value)}`, await f.arrayBuffer(), true);
+  await load();
+  toast('形象图已更换');
 });
 </script>
 
@@ -68,9 +101,26 @@ const changeAvatar = guard(async () => {
         <div class="row" style="gap: 14px; flex-wrap: wrap">
           <Avatar v-if="being" :being="being" />
           <button class="btn" type="button" @click="file.click()">换头像…</button>
-          <span class="muted">PNG、JPG、WebP，立即生效</span>
+          <span class="muted">PNG、JPG、WebP，选好后裁剪</span>
         </div>
-        <input ref="file" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="changeAvatar">
+        <input ref="file" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="pickAvatar">
+        <AvatarCrop v-if="cropSrc" :src="cropSrc" @done="saveAvatar" @close="closeCrop" />
+      </div>
+
+      <!-- 形象图 -->
+      <div class="field">
+        <label>形象图</label>
+        <button v-if="being?.portrait" class="portrait" type="button" aria-label="放大查看形象图" @click="viewer.showModal()">
+          <img :src="avatarUrl(being, 'portrait')" alt="">
+        </button>
+        <div class="row" style="gap: 14px; flex-wrap: wrap">
+          <button class="btn" type="button" @click="portraitFile.click()">换形象图…</button>
+          <span class="muted">大图原样保存，点图放大</span>
+        </div>
+        <input ref="portraitFile" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="savePortrait">
+        <dialog ref="viewer" class="viewer" aria-label="形象图" @click="viewer.close()">
+          <img v-if="being?.portrait" :src="avatarUrl(being, 'portrait')" alt="">
+        </dialog>
       </div>
       <Fields v-model="form" :spec="CARD" :cut="pv?.cut" />
       <div class="actions">

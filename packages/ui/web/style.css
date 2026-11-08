@@ -223,3 +223,42 @@ details summary { cursor: pointer; font-weight: 700; margin: 18px 0 10px; }
 :root[data-embed="1"] h2 { font-size: 20px; margin-bottom: 12px; }
 :root[data-embed="1"] .panel { padding: 16px; border-radius: 20px; }
 :root[data-embed="1"] .stage { min-height: 460px; }
+
+/* 头像裁剪弹窗 */
+.crop {
+  border: 1px solid var(--panel-border); border-radius: 18px; padding: 20px;
+  color: var(--text); background: var(--panel), var(--card-base); box-shadow: var(--glow-strong);
+}
+
+.crop::backdrop { background: rgba(20, 14, 50, .45); }
+
+.crop h3 { margin: 0 0 14px; }
+
+.crop-view {
+  position: relative; overflow: hidden; touch-action: none; cursor: grab; border-radius: 12px; background: #000;
+}
+
+.crop-view:active { cursor: grabbing; }
+
+.crop-view img { position: absolute; top: 0; left: 0; max-width: none; user-select: none; pointer-events: none; }
+
+/* 圆形遮罩：圈外压暗，圈内就是最终头像 */
+.crop-view::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle closest-side, transparent 99%, rgba(0, 0, 0, .55) 100%);
+}
+
+.crop-zoom { display: flex; gap: 10px; align-items: center; margin: 14px 0; }
+
+.crop-zoom input { flex: 1; accent-color: var(--pink); }
+
+/* 形象图：任意比例都完整显示，不裁不拉伸 */
+.portrait { display: block; width: fit-content; max-width: 100%; padding: 0; margin-bottom: 10px; border: 1px solid var(--panel-border); border-radius: 12px; background: rgba(0, 0, 0, .15); cursor: zoom-in; overflow: hidden; }
+
+.portrait img { display: block; max-width: 100%; max-height: 360px; object-fit: contain; }
+
+.viewer { padding: 0; border: 0; background: transparent; max-width: 96vw; max-height: 96vh; cursor: zoom-out; }
+
+.viewer::backdrop { background: rgba(10, 8, 30, .85); }
+
+.viewer img { display: block; max-width: 96vw; max-height: 96vh; object-fit: contain; }
