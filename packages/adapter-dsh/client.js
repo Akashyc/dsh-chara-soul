@@ -176,6 +176,128 @@ window.__ModuleLoader__.load({
                 h('path', { d: 'M11.4 14.4c1 .6 2.4.6 3.4 0' }))
         }
 
+        // ── 会话头 chip：把「有分身在跑、跑了多久」变成界面上看得见的一行（M10 §6.4.3 方案 C）──
+        // 契约（全部读码确认，不靠猜）：
+        // · 槽位 conversation.session.header.actions 是 kind:'list'、scope:'session'
+        //   （dsh-client-ui-conversation/lib/client.js:22928-22931）；list 冲突判定是
+        //   id 与 priority 同时相同才抛 already has a registration（dsh-client-ui-slots/lib/index.js:181-186）。
+        // · 官方 dsh-client-ui-subagent 占 id:'subagent-catalog'、order:10、未给 priority（=0）
+        //   （dsh-client-ui-subagent/lib/client.js:1266-1272）。本条目 id 不同、priority 也不同，
+        //   不触发冲突；list 按 priority → order 排序，所以 priority:5 会稳定排在官方那个之后。
+        // · entry options 白名单只有 key/id/order/label/priority/select/inject/children/store/locale/registrant，
+        //   没有 badge/count（dsh-client-ui-slots/lib/index.js:204-219）→ 数字必须当文本画进组件。
+        // · 会话头组件带标准属性 sessionId / useSessions / useSessionStatus；useSessions 能读到
+        //   projectionsBySession[sessionId].values.subagentCatalog 与 byId[childId].projectionValues.subagentTiming
+        //   ——官方 SubagentHeaderLineage 就是这么读的（client.js:636-641），list snapshot 定义见
+        //   dsh-api-session-controller/lib/client.js:4241、projectionStores 读取见 :3536/:4184-4207。
+        // · subagentTiming.active 只在 turn 未结束时存在（dsh-subagent/lib/types/projection.js:43-73），
+        //   故 active 存在即「这一轮还在跑」，起点就是 active.since；官方算法见
+        //   dsh-client-ui-subagent/lib/client.js:70-77。
+        const CHIP_SLOT = 'conversation.session.header.actions'
+        const CHIP_ID = 'chara-envoys'
+        const CHIP_ORDER = 20
+        const CHIP_PRIORITY = 5
+        const NOOP_HOOK = function () { return undefined }
+        const CHIP = {
+            display: 'inline-flex', alignItems: 'center', gap: 5, flex: '0 0 auto',
+            padding: '2px 8px', borderRadius: 999, fontSize: 12, lineHeight: '18px',
+            fontWeight: 600, whiteSpace: 'nowrap', color: 'inherit',
+            border: '1px solid rgba(127,127,127,0.4)', background: 'rgba(127,127,127,0.12)',
+        }
+        const CHIP_CLOCK = {
+            fontFamily: 'ui-monospace, Consolas, monospace', fontVariantNumeric: 'tabular-nums',
+            fontSize: 12, opacity: 0.8,
+        }
+
+        /** 秒级重绘用的时钟：mm:ss，超过一小时补上小时位。 */
+        function clockText(ms) {
+            const total = Math.floor(Math.max(0, ms) / 1000)
+            const h = Math.floor(total / 3600)
+            const m = Math.floor(total / 60) % 60
+            const s = total % 60
+            const mm = (m < 10 ? '0' : '') + m
+            const ss = (s < 10 ? '0' : '') + s
+            return h > 0 ? h + ':' + mm + ':' + ss : mm + ':' + ss
+        }
+
+        /**
+         * 把「在跑的分身有几个、最早一个从什么时候起跑」压成一个字符串签名。
+         * 必须是字符串：useSessions 是 zustand selector 钩子，按 Object.is 比较；
+         * 返回新对象每次都变就会造成渲染风暴，所以只回原始值。
+         */
+        function envoysSignature(state, sessionId) {
+            if (!state || typeof sessionId !== 'string' || sessionId === '') return ''
+            const self = state.byId && state.byId[sessionId]
+            if (self && self.origin === 'subagent') return '' // 子会话自带面包屑，这里不重复挂
+            const projection = state.projectionsBySession && state.projectionsBySession[sessionId]
+            const catalog = projection && projection.values && projection.values.subagentCatalog
+            if (!catalog || typeof catalog.length !== 'number' || catalog.length === 0) return ''
+            const byId = state.byId || {}
+            let count = 0
+            let since = -1
+            for (let i = 0; i < catalog.length; i += 1) {
+                const entry = catalog[i]
+                if (!entry || typeof entry.id !== 'string') continue
+                if (entry.mode === 'external') continue // 外部智能体不归我们管
+                const row = byId[entry.id]
+                const timing = row && row.projectionValues && row.projectionValues.subagentTiming
+                const active = timing && timing.active
+                const running = (active !== undefined && active !== null)
+                    || entry.activity === 'running'
+                    || (row !== undefined && row.running === true)
+                if (!running) continue
+                count += 1
+                const start = active && typeof active.since === 'number' ? active.since : -1
+                if (start > 0 && (since < 0 || start < since)) since = start
+            }
+            if (count === 0) return ''
+            return String(count) + '|' + String(since)
+        }
+
+        function parseSignature(signature) {
+            if (typeof signature !== 'string' || signature === '') return null
+            const parts = signature.split('|')
+            if (parts.length !== 2) return null
+            const count = Number(parts[0])
+            if (!(count > 0)) return null
+            const since = Number(parts[1])
+            return { count: count, since: since > 0 ? since : 0 }
+        }
+
+        /**
+         * 会话头 chip 本体：有分身在跑才渲染，一个都没有时返回 null（不留空白占位）。
+         * 每秒重绘一次时钟；投影变化（分身起停）由 useSessions 触发重绘。
+         */
+        function CharaEnvoysChip(props) {
+            const p = props || {}
+            const sessionId = typeof p.sessionId === 'string' ? p.sessionId : ''
+            const useSessions = typeof p.useSessions === 'function' ? p.useSessions : NOOP_HOOK
+            const signature = useSessions(function (state) {
+                try {
+                    return envoysSignature(state, sessionId)
+                } catch (e) {
+                    return ''
+                }
+            })
+            const [now, setNow] = React.useState(function () { return Date.now() })
+            const [seenAt, setSeenAt] = React.useState(0) // 投影里没有起跑时刻时，用第一次看到的时刻
+            React.useEffect(function () {
+                if (!signature) return undefined
+                setSeenAt(Date.now())
+                const timer = setInterval(function () { setNow(Date.now()) }, 1000)
+                return function () { clearInterval(timer) }
+            }, [signature])
+            const parsed = parseSignature(signature)
+            if (!parsed) return null
+            const elapsed = Math.max(0, now - (parsed.since || seenAt || now))
+            const label = '分身 ' + parsed.count + ' 运行中'
+            return h('span', { className: 'chara-envoys-chip', style: CHIP, title: label + ' · 已跑 ' + clockText(elapsed) },
+                h('span', null, label),
+                h('span', { style: CHIP_CLOCK }, '·'),
+                h('span', { style: CHIP_CLOCK }, clockText(elapsed)))
+        }
+
+
         return {
             name: 'dsh-chara-soul-client',
             inject: ['slots'],
@@ -197,6 +319,21 @@ window.__ModuleLoader__.load({
                     })
                 } catch (e) {
                     console.warn('[dsh-chara-soul] 侧栏面板没挂上：', e)
+                }
+
+                // 会话头 chip：只加一个自己的 list 条目，不动官方 subagent-catalog，也不动侧栏。
+                // 槽位不存在或冲突时安静跳过，绝不把异常抛出 apply。
+                try {
+                    ctx.slots.inject(CHIP_SLOT, function () {
+                        return ctx.slots.register({
+                            name: CHIP_SLOT,
+                            id: CHIP_ID,            // 官方是 'subagent-catalog'
+                            order: CHIP_ORDER,      // 官方 10 → 20，排在它后面
+                            priority: CHIP_PRIORITY, // 官方未给（=0）→ 5，list 冲突判定是 id+priority
+                        }, CharaEnvoysChip)
+                    })
+                } catch (e) {
+                    console.warn('[dsh-chara-soul] 会话头 chip 没挂上：', e)
                 }
             },
         }
