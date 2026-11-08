@@ -29,11 +29,11 @@ export function openRoster(home, now = Date.now) {
       return get(id);
     },
     rename: (id, name) => db.prepare('UPDATE beings SET name = ? WHERE id = ?').run(name, id),
-    /** 按 id 或名字找；名字重复时要求用 id。 */
-    find(key) {
+    /** 按 id 或名字找；名字重复时要求用 id。keep 过滤掉不算数的行（如文件已被删的个体）。 */
+    find(key, keep = () => true) {
       const byId = get(key);
-      if (byId) return byId;
-      const rows = db.prepare('SELECT * FROM beings WHERE name = ?').all(key);
+      if (byId) return keep(byId) ? byId : null;
+      const rows = db.prepare('SELECT * FROM beings WHERE name = ?').all(key).filter(keep);
       if (rows.length > 1) throw new Error(`有 ${rows.length} 个叫「${key}」的个体，请用 id：${rows.map((r) => r.id).join('、')}`);
       return rows[0] ?? null;
     },

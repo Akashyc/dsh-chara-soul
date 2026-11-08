@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createCore } from 'chara-core';
@@ -131,6 +131,23 @@ test('验收 8：两个个体互不相通，切走的个体时间照样流逝', 
     assert.match(core.moment(), /过去了 3 天/);
     assert.match(core.command('list').text, /▶ 甲/);
     assert.equal(core.command('use 丙').ok, false);
+  }));
+
+test('用户手动删掉个体文件夹：不再列出、不能切换、不重建文件夹', () =>
+  withHome(({ core, home }) => {
+    const id = core.command('new 测试').text.match(/（(b-[0-9a-f]+)）/)[1];
+    core.command('new 甲');
+    core.command('use 测试');
+    const dir = path.join(home, 'beings', id);
+    rmSync(dir, { recursive: true, force: true });
+    assert.equal(core.nature(), '', '当前个体被删后什么都不注入');
+    assert.doesNotMatch(core.command('list').text, /测试/);
+    assert.equal(core.view.beings().length, 1);
+    assert.equal(core.command('use 测试').ok, false);
+    assert.throws(() => core.view.card(id), /没有这个个体/);
+    assert.equal(existsSync(dir), false, '不替它建回空文件夹');
+    core.command('new 测试');
+    assert.ok(core.command('use 测试').ok, '同名的新个体不和已删的撞名');
   }));
 
 test('原话按个体分库，cli 也能读（验收 10 的前提）', async () => {

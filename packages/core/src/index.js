@@ -26,6 +26,9 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
   const avatarOf = (id) => [...AVATARS, 'source.png'].map((f) => path.join(beingDir(id), f)).find((f) => existsSync(f)) ?? null;
   const profileFile = () => path.join(home, 'profiles', `${roster.getState('profile') ?? 'default'}.yaml`);
   const open = new Map(); // id → { life, nature, stamp, error }
+  // 用户手动删掉个体文件夹时，名册行还在：只认角色卡还在的，也不替它重建文件夹（004 号决定：名册行不删）
+  const alive = (id) => existsSync(cardFile(id));
+  const rows = () => roster.list().filter((r) => alive(r.id));
 
   function being(id) {
     if (!open.has(id)) open.set(id, { life: openLife(beingDir(id)), nature: '', stamp: '', error: null });
@@ -48,7 +51,7 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
 
   const current = () => {
     const row = roster.current();
-    return row ? { row, ...being(row.id) } : null;
+    return row && alive(row.id) ? { row, ...being(row.id) } : null;
   };
 
   /** 本性：没有个体时为空串，什么都不注入。 */
@@ -77,7 +80,7 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
 
   /** 分身的简报。没有个体或没有任务时返回空串。 */
   function envoyBrief(args = {}) {
-    const row = roster.current();
+    const row = current()?.row;
     return row && args.task?.trim() ? buildBrief(row.name, args) : '';
   }
 
@@ -131,12 +134,12 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
     },
     list() {
       const cur = roster.current()?.id;
-      const rows = roster.list();
-      return ok(rows.length ? rows.map((r) => `${r.id === cur ? '▶' : ' '} ${r.name}（${r.id}）`).join('\n') : '还没有个体，用 new <名字> 创建。');
+      const list = rows();
+      return ok(list.length ? list.map((r) => `${r.id === cur ? '▶' : ' '} ${r.name}（${r.id}）`).join('\n') : '还没有个体，用 new <名字> 创建。');
     },
     use(key) {
       if (!key) return fail('用法：use <名字或 id>');
-      const row = roster.find(key);
+      const row = roster.find(key, (r) => alive(r.id));
       if (!row) return fail(`没有叫「${key}」的个体。`);
       roster.setCurrent(row.id);
       return ok(`已切换到「${row.name}」，下一轮生效。`);
@@ -169,7 +172,7 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
   }
 
   const known = (id) => {
-    if (!roster.get(id)) throw new Error(`没有这个个体：${id}`);
+    if (!roster.get(id) || !alive(id)) throw new Error(`没有这个个体：${id}`);
     return id;
   };
 
@@ -177,7 +180,7 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
   const view = {
     beings() {
       const cur = roster.current()?.id;
-      return roster.list().map((r) => {
+      return rows().map((r) => {
         const b = being(r.id);
         let card = {};
         try {
