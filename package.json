@@ -1,6 +1,6 @@
 {
   "name": "dsh-chara-soul",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "description": "角色灵魂引擎：给 DeepSeek 一段完整的一生（DSH 插件）",
@@ -9,12 +9,14 @@
   "main": "packages/adapter-dsh/src/index.js",
   "exports": {
     ".": "./packages/adapter-dsh/src/index.js",
+    "./client": "./packages/adapter-dsh/client.js",
     "./cordis.patch.yml": "./packages/adapter-dsh/cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "packages/core/src",
     "packages/adapter-dsh/src",
+    "packages/adapter-dsh/client.js",
     "packages/ui/src",
     "packages/ui/dist",
     "packages/adapter-dsh/cordis.patch.yml"
@@ -29,6 +31,14 @@
   "dsh": {
     "bundle": {
       "patch": "./packages/adapter-dsh/cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
     }
   },
   "dependencies": {

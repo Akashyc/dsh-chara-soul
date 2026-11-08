@@ -209,3 +209,17 @@ details summary { cursor: pointer; font-weight: 700; margin: 18px 0 10px; }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* 内嵌模式（DSH 侧栏面板等宿主外壳）：这片区域本身就是页面主体，
+   收起品牌行与装饰性气泡，顶栏贴边、内容吃满宽度 */
+:root[data-embed="1"] header { max-width: none; width: auto; margin: 8px 8px 0; }
+:root[data-embed="1"] .brand,
+:root[data-embed="1"] .btn.theme,
+:root[data-embed="1"] .bubbles { display: none; }
+:root[data-embed="1"] .who { flex: 1; }
+:root[data-embed="1"] nav { margin-left: auto; overflow-x: auto; scrollbar-width: none; }
+:root[data-embed="1"] nav::-webkit-scrollbar { display: none; }
+:root[data-embed="1"] main { max-width: none; padding: 14px 8px 48px; }
+:root[data-embed="1"] h2 { font-size: 20px; margin-bottom: 12px; }
+:root[data-embed="1"] .panel { padding: 16px; border-radius: 20px; }
+:root[data-embed="1"] .stage { min-height: 460px; }

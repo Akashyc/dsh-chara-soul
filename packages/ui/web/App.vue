@@ -10,14 +10,29 @@ import MomentPage from './components/MomentPage.vue';
 const TABS = [['beings', '个体'], ['card', '角色卡'], ['profile', '画像'], ['moment', '此刻']];
 const PAGES = { beings: BeingsPage, card: CardPage, profile: ProfilePage, moment: MomentPage };
 
-/* 明暗：自动跟随系统，按钮在 自动 → 浅色 → 深色 之间切换 */
+/* 内嵌（DSH 侧栏面板等）：宿主只给宽度，页面自己撑满；样式上用 data-embed 收紧留白、收起品牌行 */
+const embed = new URLSearchParams(location.search).has('embed');
+if (embed) document.documentElement.dataset.embed = '1';
+
+/* 明暗：自动跟随系统，按钮在 自动 → 浅色 → 深色 之间切换；
+   内嵌时以宿主推来的主题为准——宿主切明暗，这边跟着变，不留一黑一白的分界线 */
 const media = matchMedia('(prefers-color-scheme: dark)');
 const mode = ref(localStorage.getItem('chara-theme') ?? 'auto');
+const forced = ref(''); // 宿主 postMessage 推来的 'dark' | 'light'；空串表示自己决定
 const dark = ref(false);
 function applyTheme() {
-  dark.value = mode.value === 'dark' || (mode.value === 'auto' && media.matches);
-  document.documentElement.dataset.theme = dark.value ? 'dark' : 'light';
+  const want = forced.value || (mode.value === 'auto' ? (media.matches ? 'dark' : 'light') : mode.value);
+  dark.value = want === 'dark';
+  document.documentElement.dataset.theme = want;
 }
+// 只认同源消息：跨源页面谁都发得出 postMessage，不能拿它当指令
+addEventListener('message', (e) => {
+  if (e.origin !== location.origin) return;
+  const d = e.data;
+  if (!d || d.type !== 'chara:theme') return;
+  forced.value = d.theme === 'dark' ? 'dark' : d.theme === 'light' ? 'light' : '';
+  applyTheme();
+});
 function cycleTheme() {
   mode.value = { auto: 'light', light: 'dark', dark: 'auto' }[mode.value];
   localStorage.setItem('chara-theme', mode.value);

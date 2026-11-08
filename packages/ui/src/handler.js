@@ -42,12 +42,17 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {} 
       const json = async () => JSON.parse((await readBody(req)).toString('utf8') || '{}');
       const done = (r) => (onChange(), send(r.ok ? 200 : 400, r.ok ? r : { error: r.text }));
       const is = (method, p) => req.method === method && route === p;
+      // 防 DNS 重绑定：外部网页把自己的域名解析到本机后算「同源」，能读 boot.json 拿令牌；它发来的 Host 是自己的域名
+      if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(req.headers.host ?? '')) return send(403, { error: '只接受本机地址访问' });
 
       if (req.method === 'GET' && (route === '/' || /^\/assets\/[\w.-]+$/.test(route))) {
         const f = new URL(route === '/' ? 'index.html' : route.slice(1), DIST);
         if (!existsSync(f)) return send(route === '/' ? 503 : 404, route === '/' ? '界面还没构建：在项目根目录运行 npm run build' : '没有这个文件', 'text/plain; charset=utf-8');
         return send(200, readFileSync(f), TYPES[path.extname(f.pathname)] ?? 'application/octet-stream');
       }
+      // 客户端插件（DSH 侧栏面板，也适用于别的宿主外壳）从这里拿挂载点与令牌：
+      // 跨源读会被浏览器拦，DNS 重绑定由上面的 Host 检查挡住；本机程序能读到，但它们本来就能直接读数据目录
+      if (is('GET', '/boot.json')) return send(200, { prefix: prefix || '', token });
       // 页面本身不含数据，接口一律要令牌。写操作只认请求头：别的网页能骗浏览器发表单，却加不了自定义请求头
       const headerOk = req.headers['x-chara-token'] === token;
       if (!headerOk && !(req.method === 'GET' && q('t') === token)) return send(403, { error: '令牌不对，请从 /chara ui 给出的链接打开' });

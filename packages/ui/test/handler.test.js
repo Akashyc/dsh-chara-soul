@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request } from 'node:http';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -23,6 +23,15 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     // 页面要 npm run build 之后才有；没构建时给出提示而不是报错
     assert.ok(page.status === 200 ? /id="app"/.test(page.data) : page.status === 503 && /npm run build/.test(page.data), '页面本身不需要令牌');
     assert.equal((await call('GET', '/assets/..%2f..%2fsrc%2fhandler.js', undefined, {})).status, 403, '静态文件只认 assets 下的文件名');
+    // 宿主外壳（DSH 侧栏面板）从这里取前缀与令牌：同源才读得到，所以不需要令牌就能拿
+    const boot = await call('GET', '/boot.json', undefined, {});
+    assert.equal(boot.status, 200, '启动信息不需要令牌');
+    assert.deepEqual(boot.data, { prefix: '/x', token: 'tk' });
+    // fetch 改不了 Host 头，用 http.request 模拟 DNS 重绑定
+    const rebound = await new Promise((resolve, reject) =>
+      request(`${base}/boot.json`, { headers: { host: 'evil.example:80' } }, (r) => (r.resume(), resolve(r.statusCode))).on('error', reject).end(),
+    );
+    assert.equal(rebound, 403, '外部域名的 Host 拿不到令牌');
     assert.equal((await call('GET', '/api/state', undefined, {})).status, 403);
     assert.equal((await call('GET', '/api/state?t=tk', undefined, {})).status, 200, '读接口可用查询参数令牌（头像 img 要用）');
     assert.equal((await call('POST', '/api/new?t=tk', { name: '小鲸' }, {})).status, 403, '写操作只认请求头');
