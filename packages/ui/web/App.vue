@@ -42,6 +42,22 @@ function cycleTheme() {
 media.addEventListener('change', applyTheme);
 applyTheme();
 
+/**
+ * 切到另一个页签；当前页有没保存的改动时先确认，免得切走就丢。
+ * @param id 页签 id
+ */
+function go(id) {
+  if (id === state.tab) return;
+  if (state.dirty && !confirm('有改动还没保存，离开这一页会丢掉这些改动，继续吗？')) return;
+  state.dirty = false;
+  state.tab = id;
+}
+
+// 关窗口、刷新、侧栏面板被卸载时，浏览器自带的「离开此页」提示
+addEventListener('beforeunload', (e) => {
+  if (state.dirty) e.preventDefault();
+});
+
 onMounted(guard(load));
 </script>
 
@@ -59,7 +75,7 @@ onMounted(guard(load));
       <span v-else>还没有个体</span>
     </span>
     <nav role="tablist" aria-label="页面">
-      <button v-for="[id, label] in TABS" :key="id" role="tab" type="button" :aria-selected="state.tab === id" @click="state.tab = id">{{ label }}</button>
+      <button v-for="[id, label] in TABS" :key="id" role="tab" type="button" :aria-selected="state.tab === id" @click="go(id)">{{ label }}</button>
     </nav>
     <button class="btn theme" type="button" :aria-label="{ auto: '明暗：跟随系统', light: '明暗：浅色', dark: '明暗：深色' }[mode]" :title="{ auto: '明暗：跟随系统', light: '明暗：浅色', dark: '明暗：深色' }[mode]" @click="cycleTheme">
       {{ mode === 'auto' ? '◐' : dark ? '☾' : '☀' }}

@@ -4,16 +4,16 @@
     - id: chara-soul
       name: dsh-chara-soul
 
-# 「角色灵魂」预设（005 号决定）：本体陪聊用，只挂聊天用得上的工具；要干活就用 chara_envoy 派分身，分身按设置里的预设拿全套工具。
-# 插件名与配置项照抄 DSH 0.2.x 官方预设（standard / minimal），升级 DSH 0.3 时要逐行核对。
+# 「Soul·闲谈陪伴」预设（005 号决定，id 仍是 chara-soul）：本体陪聊用，只挂聊天用得上的工具；要干活就用 chara_envoy 派分身，分身按设置里的预设拿全套工具。
+# 插件名与配置项照抄 DSH 官方预设（standard / minimal）；官方改了插件名或配置项，这里要跟着改。
 # 子会话服务在宿主层，不随预设挂载，所以这里不挂 subagent 工具，chara_envoy 照样能派分身。
 - insert:
     - id: preset-chara-soul
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: chara-soul
-        name: 角色灵魂
-        description: 陪聊用：工具精简、早压缩，身份交给本性；读写文件、跑命令等活由分身去办。
+        name: Soul·闲谈陪伴
+        description: 陪聊用：工具精简、早压缩，身份交给本性；能读、能搜文件，写文件、跑命令等活由分身去办。
         order: 30
         plugins:
           # 前缀必填；写中性的一句，身份由本性决定。后缀省略即为空，规则写在本性里，换预设也生效
@@ -28,6 +28,11 @@
               readImage: true
               write: false
               edit: false
+          # 只读地找文件、搜内容：没有它，本体只能猜路径去 read
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
           - id: tool-skill
@@ -60,3 +65,122 @@
             config:
               fetch: true
               searchTimeoutMs: 60000
+
+# 「Soul·全能女仆」预设（id chara-soul-maid）：干活用。本体是拿主意的那一个——分析、定方案、派活、验收；
+# 工具照官方 standard 的全套，压缩与输出裁剪照 dsh-flash-presets；干活纪律写在人格后缀里。
+# 不挂官方的 subagent / subagent_fork，免得和 chara_envoy 抢活；留 subagent-control，本体能查看、取消分身。
+# 原生执行，不用 PTC：PTC 下要先写代码才能派分身。计划模式那段照抄官方 standard。
+- insert:
+    - id: preset-chara-soul-maid
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: chara-soul-maid
+        name: Soul·全能女仆
+        description: 干活用：工具全套，本体分析、定方案、派活并验收；大活交给分身，早压缩省 token。
+        order: 31
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: 你是陪伴并协助用户的角色。你是谁、怎么说话，以下面的本性为准；怎么干活，以本段末尾的规则为准。
+              suffix: |-
+                干活规则（本性管你怎么说话，这里管你怎么做事）：
+                1. 你是拿主意的那一个：先弄清事实、分析、定方案，再动手或派活。方案有取舍时说清理由；不同意用户时直说。
+                2. 一两步能办完的事自己办。大批量改动、耗时长、要跑很多命令的执行，用 chara_envoy 派分身，写清对象、范围和验收标准。派出后先告诉用户派它去办什么。
+                3. 分身汇报回来，按验收标准核对（读文件、跑检查），没达标就指出问题再派或自己补，再告诉用户结果。不要原样转述没核对过的汇报。
+                4. 省轮次：互不依赖的调用放进同一步；看文件用 read、glob、grep，不用终端翻文件；长输出先过滤或写进临时文件。
+                5. 交付前对照全部要求做一次验收，报出实测结果，说明哪些没验证；验收过了就停，不反复加测。
+                6. 同一个办法失败两次就换办法；再不行，带上命令和实际输出报告卡在哪。
+                7. 不把密钥、令牌、隐私原文放进对话，用路径指代。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: planning
+            name: cordis:group
+            group: true
+            isolate:
+              planMode: true
+            config:
+              - id: plan-mode
+                name: '@deepseek-ai/dsh-plan-mode'
+                config:
+                  section: |
+                    You are in plan mode. Stay in plan mode until the user approves your plan through exit_plan_mode or switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+                    Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+                    The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+                    Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+                    Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+                    When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+                config:
+                  thresholdRatio: 0.25
+                  retainTokens: 20000
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'

@@ -18,7 +18,8 @@ export async function api(method, route, body, raw) {
 /** 头像或形象图的地址；kind 是 avatar 或 portrait，v 带修改时间让换图后不吃缓存。 */
 export const avatarUrl = (b, kind = 'avatar') => `${base}/api/${kind}?id=${encodeURIComponent(b.id)}&t=${encodeURIComponent(token)}&v=${b[kind]}`;
 
-export const state = reactive({ beings: [], show: '', tab: 'beings', toast: null, tint: {} });
+// dirty：当前页有没保存的改动（角色卡、画像页写入），切页签和关页面前据此提醒
+export const state = reactive({ beings: [], show: '', tab: 'beings', toast: null, tint: {}, dirty: false });
 export const current = computed(() => state.beings.find((b) => b.current));
 
 export async function load() {

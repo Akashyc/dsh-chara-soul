@@ -80,7 +80,7 @@ const removeOld = guard(async () => {
       <div class="field">
         <label for="envoy-preset">分身用的预设</label>
         <Select id="envoy-preset" v-model="envoyPreset" :options="presetOptions" />
-        <span class="muted">会话选「角色灵魂」预设时，本体工具很少，派出的分身改用这里的预设拿全套工具；会话用别的预设时，分身照旧跟着会话走。</span>
+        <span class="muted">会话选「Soul·闲谈陪伴」或「Soul·全能女仆」时，派出的分身用这里的预设；会话用别的预设时，分身跟着会话走。</span>
       </div>
       <div class="actions"><button class="btn primary" type="button" @click="savePreset">保存</button></div>
     </div>

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed, watch, watchEffect } from 'vue';
 import { state, current, api, load, toast, guard, avatarUrl } from '../store.js';
 import Avatar from './Avatar.vue';
 import AvatarCrop from './AvatarCrop.vue';
@@ -21,8 +21,9 @@ const editing = ref(current.value?.id ?? state.beings[0]?.id ?? null);
 const being = computed(() => state.beings.find((b) => b.id === editing.value));
 const form = reactive({});
 const pv = ref(null);
-const saved = ref(''); // 上次读入或保存时的表单快照，用来判断有没有没保存的改动
+const saved = ref('{}'); // 上次读入或保存时的表单快照（读入前和空表单一致，不算有改动），用来判断有没有没保存的改动
 const dirty = computed(() => JSON.stringify(form) !== saved.value);
+watchEffect(() => (state.dirty = dirty.value)); // 交给 App 在切页签、关页面前提醒
 const beingOptions = computed(() => state.beings.map((b) => ({ value: b.id, label: b.name, being: b })));
 
 /**

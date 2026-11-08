@@ -1,6 +1,6 @@
 <script setup>
-import { reactive, ref, computed } from 'vue';
-import { api, load, toast, guard } from '../store.js';
+import { reactive, ref, computed, watchEffect } from 'vue';
+import { state, api, load, toast, guard } from '../store.js';
 import Fields from './Fields.vue';
 
 const PROFILE = [
@@ -14,6 +14,7 @@ const PROFILE = [
 const form = reactive(Object.fromEntries(PROFILE.map(([k]) => [k, ''])));
 const saved = ref(JSON.stringify(form)); // 上次读入或保存时的快照，用来判断有没有没保存的改动
 const dirty = computed(() => JSON.stringify(form) !== saved.value);
+watchEffect(() => (state.dirty = dirty.value)); // 交给 App 在切页签、关页面前提醒
 
 guard(async () => {
   const p = await api('GET', 'profile');

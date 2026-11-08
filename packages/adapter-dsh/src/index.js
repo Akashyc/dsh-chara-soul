@@ -19,10 +19,11 @@ export const inject = [];
 export const isUserSpeech = (message) => message?.source?.kind === 'user';
 
 /**
- * 用户在界面里打的字带 rpcId（客户端请求号）；分身与 mnemon 后台任务收到的提示只有 { kind: 'user' }。
- * shortcut: 用 rpcId 判断主会话，接入 QQ 等非界面来源（第三期）时改用宿主正式的父子字段。
+ * 主会话里用户说的话。实测会话头：分身带 parentSession 与 origin: 'subagent'，主会话两者都没有。
+ * 不看 rpcId：DSH 界面打的字带它，QQ 插件转进来的消息只有 { kind: 'user' }。
  */
-export const isFromClient = (message) => isUserSpeech(message) && typeof message.source.rpcId === 'string';
+export const isMainSpeech = (message, session) =>
+  isUserSpeech(message) && !session?.header?.parentSession && session?.header?.origin !== 'subagent';
 
 /** 从消息里取出纯文本。 */
 export function messageText(message) {
@@ -34,8 +35,8 @@ export function messageText(message) {
 
 const SERVICES = ['systemPrompt', 'tools', 'commands', 'llm', 'subagents', 'agents', 'agentPresets'];
 
-/** 本项目自带的陪聊预设 id，定义在 cordis.patch.yml（005 号决定）。 */
-export const OWN_PRESET = 'chara-soul';
+/** 本项目自带的预设 id：闲谈陪伴、全能女仆，定义在 cordis.patch.yml（005 号决定）。 */
+export const OWN_PRESETS = ['chara-soul', 'chara-soul-maid'];
 
 // 官方预设不发布显示名（界面上的名字来自宿主客户端的字典），这里补上中文名
 const BUILT_IN = { standard: '标准', ptc: 'PTC', minimal: '极简', cordis: '创造' };
@@ -125,7 +126,7 @@ export function apply(ctx, _config, deps = {}) {
       if (event.type === 'user/message') {
         if (!isUserSpeech(message)) return;
         // 实测 header：分身会话带 parentSession、origin: 'subagent'、delegationDepth ≥ 1
-        if (isFromClient(message) && !session?.header?.parentSession) mainSessions.add(sid);
+        if (isMainSpeech(message, session)) mainSessions.add(sid);
         if (!mainSessions.has(sid)) return;
         core.afterTurn({ session: sid, role: 'user', text: messageText(message), tz: message.source.clientTimeZone });
       } else if (mainSessions.has(sid)) {
@@ -142,7 +143,7 @@ export function apply(ctx, _config, deps = {}) {
       c.tools.register(
         defineTool({
           name: 'chara_envoy',
-          description: '派一个分身去办要读写文件、跑命令或比较耗时的事。立即返回；分身办完后你会收到它的汇报，再用自己的话转告用户。',
+          description: '派一个分身去办手边没有工具办的事（写文件、跑命令等），或大批量、耗时长的活。立即返回；分身办完后你会收到它的汇报，核对后再用自己的话转告用户。',
           parameters: {
             task: { type: 'string', required: true, description: '要办的事，写清对象、范围与具体要求' },
             acceptance: { type: 'string', description: '怎样算办完' },
@@ -156,8 +157,8 @@ export function apply(ctx, _config, deps = {}) {
             if (!subagents?.startActivation || !exec?.agent) return '当前不能派分身。请你在这一轮里自己把事办完。';
             // 实测：分身会话也被注入了本性，会看到「用 chara_envoy」；只许主会话派，防止分身再派分身
             if (!mainSessions.has(String(exec.agent.session?.id))) return '你自己就是分身，不能再派分身。请直接把事办完，按简报汇报。';
-            // 本体在「角色灵魂」预设下工具很少，分身改用设置里的全量预设；别的预设本来就是全量的，让分身继承
-            const preset = presetOf(exec.agent) === OWN_PRESET ? core.view.settings().envoyPreset : undefined;
+            // 自带预设下分身改用设置里的预设：闲谈陪伴工具少；全能女仆的规则是写给拿主意的本体的，分身继承了会以为自己该派活。别的预设让分身继承
+            const preset = OWN_PRESETS.includes(presetOf(exec.agent)) ? core.view.settings().envoyPreset : undefined;
             try {
               const { childId } = await subagents.startActivation({
                 provider: 'spawn',
@@ -167,7 +168,7 @@ export function apply(ctx, _config, deps = {}) {
                 request: { prompt: [{ type: 'text', text: brief }], parent: exec.agent, ...(preset ? { agentPreset: preset } : {}) },
               });
               envoys.set(childId, { session: String(exec.agent.session?.id ?? '?'), task: String(args.task).trim(), report: '' });
-              return `分身 ${childId} 已出发。先回用户一句，继续陪聊；它办完后你会收到汇报。`;
+              return `分身 ${childId} 已出发。先告诉用户派它去办什么；它办完后你会收到汇报，核对后再转告。`;
             } catch (e) {
               log.warn('派分身失败：%s', e?.message ?? e);
               return `派分身失败（${e?.code ?? e?.message ?? e}）。请你在这一轮里自己把事办完。`;
@@ -228,7 +229,7 @@ export function apply(ctx, _config, deps = {}) {
             const mark = (list, n) => `${n} ${list.includes(n) ? '✓' : '✗'}`;
             text += `\n\n【上次实际组装】\n${mark(lastAssembly.sections, 'chara:nature')}（系统提示）  ${mark(lastAssembly.contexts, 'chara:moment')}（运行时上下文）`;
             const preset = presetOf(inv.agent);
-            if (preset) text += `\n\n【当前预设】${preset}${preset === OWN_PRESET ? '' : '。人格前缀（deployment:persona-prefix）来自这个预设，可能写着「coding agent」，和本性冲突；陪聊时建议在会话里选「角色灵魂」预设'}`;
+            if (preset) text += `\n\n【当前预设】${preset}${OWN_PRESETS.includes(preset) ? '' : '。人格前缀（deployment:persona-prefix）来自这个预设，可能写着「coding agent」，和本性冲突；建议陪聊选「Soul·闲谈陪伴」、干活选「Soul·全能女仆」'}`;
             text += `\n\n【其他插件注入的段】\n系统提示：${groupSections(lastAssembly.sections) || '无'}\n运行时上下文：${groupSections(lastAssembly.contexts) || '无'}`;
           }
           return { kind: r.ok ? 'success' : 'error', text };

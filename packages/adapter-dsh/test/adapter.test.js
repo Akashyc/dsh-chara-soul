@@ -38,7 +38,7 @@ function fakeCtx() {
 const userMsg = (text, rpcId) => ({ role: 'user', source: rpcId ? { kind: 'user', rpcId, clientTimeZone: 'Asia/Shanghai' } : { kind: 'user' }, content: [{ type: 'text', text }] });
 const asstMsg = (text) => ({ turn: 1, step: 1, message: { content: text ? [{ type: 'text', text }] : [{ type: 'tool-call' }] } });
 
-test('适配器：没有个体不注入；创建后注入本性与此刻；只记主会话原话', async () => {
+test('适配器：没有个体不注入；创建后注入本性与此刻；只记主会话原话（界面与 QQ），不记分身', async () => {
   const home = mkdtempSync(path.join(tmpdir(), '适配器 '));
   const core = createCore({ home, host: 'dsh' });
   try {
@@ -53,23 +53,24 @@ test('适配器：没有个体不注入；创建后注入本性与此刻；只�
 
     const main = { id: 'session-1', header: { delegationDepth: 0 } };
     const child = { id: 'child-1', header: { parentSession: 'session-1', delegationDepth: 1 } };
-    const bg = { id: 'mnemon-run-1', header: {} };
+    const qq = { id: 'session-qq', header: { delegationDepth: 0 } }; // QQ 插件转进来的消息不带 rpcId
     emit(main, 'user/message', userMsg('我喜欢深夜聊天', 'r1'));
     emit(main, 'user/message', { role: 'user', source: { kind: 'runtime-context' }, content: [{ type: 'text', text: '此刻' }] });
     emit(main, 'assistant/message', asstMsg(''));
     emit(main, 'assistant/message', asstMsg('记住啦'));
     emit(child, 'user/message', userMsg('分身简报', 'r2')); // 有 rpcId 但带 parentSession
     emit(child, 'assistant/message', asstMsg('分身完成'));
-    emit(bg, 'user/message', userMsg('后台任务'));
-    emit(bg, 'assistant/message', asstMsg('后台结果'));
+    emit(child, 'user/message', userMsg('分身简报二')); // 实测分身的简报不带 rpcId，靠 parentSession 排除
+    assert.match(live.contexts.get('chara:moment').text(), /第一次说话/, '用户开口后有了见面记录');
+    emit(qq, 'user/message', userMsg('QQ 上说的话'));
+    emit(qq, 'assistant/message', asstMsg('QQ 上的回答'));
 
     const st = (await run('status')).text;
-    assert.match(st, /已认作主会话的：session-1$/m);
-    assert.match(live.contexts.get('chara:moment').text(), /第一次说话/, '用户开口后有了见面记录');
+    assert.match(st, /已认作主会话的：session-1、session-qq$/m);
     const { DatabaseSync } = await import('node:sqlite');
     const id = (await run('list')).text.match(/（(b-[0-9a-f]+)）/)[1];
     const db = new DatabaseSync(path.join(home, 'beings', id, 'life.db'), { readOnly: true });
-    assert.deepEqual(db.prepare('SELECT role, text FROM turns ORDER BY id').all().map((r) => `${r.role}:${r.text}`), ['user:我喜欢深夜聊天', 'assistant:记住啦']);
+    assert.deepEqual(db.prepare('SELECT role, text FROM turns ORDER BY id').all().map((r) => `${r.role}:${r.text}`), ['user:我喜欢深夜聊天', 'assistant:记住啦', 'user:QQ 上说的话', 'assistant:QQ 上的回答']);
     db.close();
 
     const show = (await run('show')).text;
@@ -135,13 +136,16 @@ test('分身：chara_envoy 派出带底线的简报，结算时把任务与汇�
     services.agentPresets = { composedPreset: (c) => (c === exec.agent.ctx ? mine : undefined) };
     exec.agent.ctx = {};
     await envoy.execute({ task: '查资料' }, exec);
-    assert.equal(sent[1].request.agentPreset, 'standard', '本体在角色灵魂预设下，分身默认用 standard');
+    assert.equal(sent[1].request.agentPreset, 'standard', '本体在闲谈陪伴预设下，分身默认用 standard');
     core.view.saveSettings({ envoyPreset: 'flash-lean-ptc-v3' });
     await envoy.execute({ task: '查资料' }, exec);
     assert.equal(sent[2].request.agentPreset, 'flash-lean-ptc-v3', '按设置里的预设派');
+    mine = 'chara-soul-maid';
+    await envoy.execute({ task: '查资料' }, exec);
+    assert.equal(sent[3].request.agentPreset, 'flash-lean-ptc-v3', '全能女仆下也按设置派，不让分身继承本体的派活规则');
     mine = 'ptc';
     await envoy.execute({ task: '查资料' }, exec);
-    assert.equal(sent[3].request.agentPreset, undefined, '别的预设本来就是全量的，让分身继承');
+    assert.equal(sent[4].request.agentPreset, undefined, '别的预设本来就是全量的，让分身继承');
     assert.throws(() => core.view.saveSettings({ envoyPreset: 'a b' }), /预设 id/);
 
     services.subagents = { startActivation: async () => { throw Object.assign(new Error('满了'), { code: 'ACTIVATION_LIMIT_REACHED' }); } };
