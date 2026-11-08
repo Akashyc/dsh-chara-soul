@@ -31,8 +31,9 @@ function fakeCtx() {
     inject: (names, cb) => cb({ ...ctx, ...Object.fromEntries(names.map((n) => [n, services[n]])) }),
   };
   const emit = (session, type, data) => listeners['session/event'].forEach((f) => f(session, { type, data }));
+  const fire = (name, ...args) => (listeners[name] ?? []).forEach((f) => f(...args));
   const run = async (raw) => commands[0].handler({ rawInput: raw });
-  return { ctx, live, emit, run, tools, services };
+  return { ctx, live, emit, fire, run, tools, services };
 }
 
 const userMsg = (text, rpcId) => ({ role: 'user', source: rpcId ? { kind: 'user', rpcId, clientTimeZone: 'Asia/Shanghai' } : { kind: 'user' }, content: [{ type: 'text', text }] });
@@ -80,6 +81,49 @@ test('适配器：没有个体不注入；创建后注入本性与此刻；只�
     // 界面：挂在 webServer 的 /x-chara-soul，/chara ui 给出带令牌的链接
     assert.equal(services.webServer.routes[0].path, '/x-chara-soul');
     assert.match((await run('ui')).text, /^chara 界面：http:\/\/127\.0\.0\.1:5173\/x-chara-soul\/\?t=[0-9a-f]{32}$/);
+  } finally {
+    core.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('分身进度：chara:envoys 段列出正在跑的分身和最新一句，结算后清空', async () => {
+  const home = mkdtempSync(path.join(tmpdir(), '分身进度 '));
+  const core = createCore({ home, host: 'dsh' });
+  try {
+    const { ctx, live, emit, fire, run, tools, services } = fakeCtx();
+    apply(ctx, {}, { core });
+    const envoy = tools.find((t) => t.name === 'chara_envoy');
+    const exec = { agent: { session: { id: 'session-1' } }, signal: new AbortController().signal };
+    const main = { id: 'session-1', header: { delegationDepth: 0 } };
+    const child = { id: 'envoy-1', header: { parentSession: 'session-1', origin: 'subagent', delegationDepth: 1 } };
+
+    await run('new 小鲸');
+    emit(main, 'user/message', userMsg('去改报告', 'r1'));
+    assert.equal(live.contexts.get('chara:envoys').text(), '', '没有分身时段文本是空串');
+    assert.equal(live.contexts.get('chara:envoys').interpolate, false);
+    assert.equal(live.contexts.get('chara:envoys').order, 942, '接在 chara:moment（941）之后');
+
+    services.subagents = { startActivation: async () => ({ childId: 'envoy-1' }) };
+    const started = await envoy.execute({ task: '改报告' }, exec);
+    assert.match(started, /envoy-1 已出发（/, '返回值带本地时刻');
+    assert.match(live.contexts.get('chara:envoys').text(), /正在跑的分身/, '派出后本体自知');
+    assert.ok(live.contexts.get('chara:envoys').text().includes('envoy-1'));
+    assert.match(live.contexts.get('chara:envoys').text(), /已跑 0 分钟/, '从 startedAt 算分钟');
+    assert.match(live.contexts.get('chara:envoys').text(), /刚出发/, '还没有进度时写刚出发');
+
+    emit(child, 'assistant/message', asstMsg('正在改报告，先看第 3 行'));
+    emit(child, 'assistant/message', asstMsg('改到一半，接着改'));
+    const line = live.contexts.get('chara:envoys').text();
+    assert.match(line, /- 分身 envoy-1：已跑 .*任务「改报告」，最近一句：改到一半，接着改$/, '取分身最新的一句');
+
+    emit(main, 'user/message', { role: 'user', source: { kind: 'subagent-settled', senderSessionId: 'envoy-1' }, content: [] });
+    assert.equal(live.contexts.get('chara:envoys').text(), '', '结算后该段变空串');
+
+    // 【上次实际组装】靠 system-prompt/assemble 事件记下来，这里喂一次真实形态的组装结果
+    await fire('system-prompt/assemble', {}, {}, async () => ({ sections: [{ name: 'chara:nature' }], contexts: [{ name: 'chara:moment' }, { name: 'chara:envoys' }] }));
+    const show = (await run('show')).text;
+    assert.ok(show.includes('chara:envoys ✓'), '【上次实际组装】标出这一段的注册状态');
   } finally {
     core.close();
     rmSync(home, { recursive: true, force: true });

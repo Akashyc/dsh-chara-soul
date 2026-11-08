@@ -74,7 +74,26 @@ export function apply(ctx, _config, deps = {}) {
     return Array.isArray(list) ? list.filter((p) => !p.broken && !OWN_PRESETS.includes(p.id)).map((p) => ({ id: p.id, name: p.name ?? BUILT_IN[p.id] ?? p.id })) : null;
   };
 
-  // 本性走系统提示段，此刻走运行时上下文。没有个体时两段都不注册，什么都不注入（验收 1）
+  // 分身登记表：子会话 id → { session, task, report, startedAt }，结算通知到达时落库并删除。
+  // 必须声明在 systemPrompt 注入之前：sync() 注册的 chara:envoys 段引用它，挪到后面会踩暂时性死区（TDZ）。
+  const envoys = new Map();
+
+  /**
+   * chara:envoys 段的文本：把还在跑的分身逐条列出来，让本体自己知道「现在有人在干、干了多久」。
+   * 函数声明（不是 const 箭头）以便提升：sync() 在注入时就建好 text 闭包。
+   * 没有分身时返回空串，宿主侧不产生 token（与 chara:moment 同一机制）。
+   */
+  function envoyLine() {
+    if (envoys.size === 0) return '';
+    const now = Date.now();
+    const lines = [...envoys].map(([id, e]) => {
+      const mins = Math.max(0, Math.floor((now - (e.startedAt ?? now)) / 60000));
+      return `- 分身 ${id}：已跑 ${mins} 分钟，任务「${String(e.task ?? '').slice(0, 60)}」${e.report ? `，最近一句：${e.report.slice(0, 120)}` : '，刚出发'}`;
+    });
+    return `正在跑的分身：\n${lines.join('\n')}`;
+  }
+
+  // 本性走系统提示段，此刻走运行时上下文。没有个体时都不注册，什么都不注入（验收 1）
   let sync = () => {};
   ctx.inject(['systemPrompt'], (c) => {
     const sp = c.systemPrompt;
@@ -84,7 +103,8 @@ export function apply(ctx, _config, deps = {}) {
       if (want && !off) {
         const a = sp.section({ name: 'chara:nature', order: (sp.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') ?? 0) + 1, interpolate: false, text: () => core.nature() });
         const b = sp.context({ name: 'chara:moment', order: (sp.getContextOrder('WORKING_DIRECTORY') ?? 940) + 1, interpolate: false, text: () => core.moment() });
-        off = () => (a(), b());
+        const ev = sp.context({ name: 'chara:envoys', order: (sp.getContextOrder('WORKING_DIRECTORY') ?? 940) + 2, interpolate: false, text: () => envoyLine() });
+        off = () => (a(), b(), ev());
       } else if (!want && off) {
         off();
         off = null;
@@ -98,9 +118,6 @@ export function apply(ctx, _config, deps = {}) {
     lastAssembly = { sections: (out?.sections ?? []).map((s) => s?.name ?? '?'), contexts: (out?.contexts ?? []).map((s) => s?.name ?? '?') };
     return out;
   });
-
-  // 分身：chara_envoy 派出时登记，分身会话里取最后一句话作汇报，结算通知到达时落库。子会话 id → { session, task, report }
-  const envoys = new Map();
 
   // 原话：只记主会话里用户亲口说的话和模型说出来的话
   ctx.on('session/event', (session, event) => {
@@ -116,7 +133,7 @@ export function apply(ctx, _config, deps = {}) {
         // （分身先用 send_message 回报时，结算通知里会省略最后一句，所以不从通知里取）
         if (event.type === 'assistant/message' && envoys.has(sid)) {
           const t = messageText(message).trim();
-          if (t) envoys.get(sid).report = t;
+          if (t) envoys.get(sid).report = t; // 结算时落库，跑的过程中也是 chara:envoys 段里的「最近一句」
         }
         return;
       }
@@ -148,7 +165,7 @@ export function apply(ctx, _config, deps = {}) {
       c.tools.register(
         defineTool({
           name: 'chara_envoy',
-          description: '派一个分身去办手边没有工具办的事（写文件、跑命令等），或大批量、耗时长的活。立即返回；分身办完后你会收到它的汇报，核对后再用自己的话转告用户。',
+          description: '派一个分身去办手边没有工具办的事（写文件、跑命令等），或大批量、耗时长的活。立即返回；分身办完后你会收到它的汇报，核对后再用自己的话转告用户。派出当轮的回复里必须用一句话告诉用户你派它去办什么、大概多久——用户看不到工具返回，只能看到你说的话。',
           parameters: {
             task: { type: 'string', required: true, description: '要办的事，写清对象、范围与具体要求' },
             acceptance: { type: 'string', description: '怎样算办完' },
@@ -172,8 +189,10 @@ export function apply(ctx, _config, deps = {}) {
                 signal: exec.signal,
                 request: { prompt: [{ type: 'text', text: brief }], parent: exec.agent, ...(preset ? { agentPreset: preset } : {}) },
               });
-              envoys.set(childId, { session: String(exec.agent.session?.id ?? '?'), task: String(args.task).trim(), report: '' });
-              return `分身 ${childId} 已出发。先告诉用户派它去办什么；它办完后你会收到汇报，核对后再转告。`;
+              const startedAt = Date.now();
+              envoys.set(childId, { session: String(exec.agent.session?.id ?? '?'), task: String(args.task).trim(), report: '', startedAt });
+              // 带上本地时刻，本体转述时手里有「几点出发」，用户至少拿到「还要多久」的锚点
+              return `分身 ${childId} 已出发（${new Date(startedAt).toLocaleTimeString('zh-CN')}）。先告诉用户派它去办什么、大概多久；它办完后你会收到汇报，核对后再转告。`;
             } catch (e) {
               log.warn('派分身失败：%s', e?.message ?? e);
               return `派分身失败（${e?.code ?? e?.message ?? e}）。请你在这一轮里自己把事办完。`;
@@ -232,7 +251,7 @@ export function apply(ctx, _config, deps = {}) {
           let text = r.text;
           if (raw === 'show' && lastAssembly) {
             const mark = (list, n) => `${n} ${list.includes(n) ? '✓' : '✗'}`;
-            text += `\n\n【上次实际组装】\n${mark(lastAssembly.sections, 'chara:nature')}（系统提示）  ${mark(lastAssembly.contexts, 'chara:moment')}（运行时上下文）`;
+            text += `\n\n【上次实际组装】\n${mark(lastAssembly.sections, 'chara:nature')}（系统提示）  ${mark(lastAssembly.contexts, 'chara:moment')}（运行时上下文）  ${mark(lastAssembly.contexts, 'chara:envoys')}（运行时上下文，分身进度）`;
             const preset = presetOf(inv.agent);
             if (preset) text += `\n\n【当前预设】${preset}${[...OWN_PRESETS, ENVOY_PRESET].includes(preset) ? '' : '。人格前缀（deployment:persona-prefix）来自这个预设，可能写着「coding agent」，和本性冲突；建议陪聊选「Soul·闲谈陪伴」、干活选「Soul·全能女仆」'}`;
             text += `\n\n【其他插件注入的段】\n系统提示：${groupSections(lastAssembly.sections) || '无'}\n运行时上下文：${groupSections(lastAssembly.contexts) || '无'}`;
