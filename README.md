@@ -103,11 +103,7 @@ New-Item -ItemType Junction -Path "$HOME\.dsh\profiles\desktop\node_modules\dsh-
 
 ### 侧栏面板（DSH）
 
-装好插件、重启 DSH 后，左侧边栏会多一个「灵魂狭间」图标，点开就是同一套界面，不用再打开浏览器标签页。明暗主题跟随 DSH。
-
-界面跑在 iframe 里：样式和宿主的全局 CSS 互相不污染，客户端插件崩了也只崩这一块面板。同一份构建产物在独立页（`/chara ui`）、DSH 侧栏、以及别的宿主外壳里都是同一套流程。
-
-面板靠 `GET /x-chara-soul/boot.json` 现场取前缀与令牌，令牌每次启动重新生成，所以不需要手动填。
+装好插件、重启 DSH 后，左侧边栏会多一个「灵魂狭间」图标，点开就是同一套界面，不用另开浏览器，也不用填令牌。明暗主题跟随 DSH。
 
 ### 自带预设（DSH）
 
@@ -198,7 +194,7 @@ npm test
 | [DeepSeek《Super-agent 设计探索》](https://zhuanlan.zhihu.com/p/2099987320443237060) | Router / Worker 双层、事件驱动与两级过滤、Inline & Spill、链式召回、状态外置、Watchdog |
 | 酒馆 Character Card V2/V3 | 角色卡导入格式 |
 
-三个仓库均为 MIT 许可。本项目借思想、自写核心，不直接依赖。
+以上四个仓库均为 MIT 许可。本项目借思想、自写核心，不直接依赖。
 
 ## 许可
 
