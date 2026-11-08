@@ -2,6 +2,8 @@
 // 只用命名导出：有 export default 时 DSH 加载器会丢掉 inject 与 Config。
 // 相对路径而不是包名：发布的安装包里核心与适配器同在一个包内，没有 chara-core 这个依赖
 import { createCore } from '../../core/src/index.js';
+import { createUiHandler } from '../../ui/src/handler.js';
+import { randomBytes } from 'node:crypto';
 
 // 宿主路由提供 @deepseek-ai/dsh-tools；本地测试时没有，退化为原样返回。
 const { defineTool } = await import('@deepseek-ai/dsh-tools').catch(() => ({ defineTool: (d) => d }));
@@ -159,6 +161,17 @@ export function apply(ctx, _config, deps = {}) {
     );
   });
 
+  // 界面挂在 DSH 自带的本机网页服务上；令牌每次启动重新生成，只通过 /chara ui 给出
+  const UI_PATH = '/x-chara-soul';
+  const token = randomBytes(16).toString('hex');
+  ctx.inject(['webServer'], (c) => {
+    c.effect(() => c.webServer.register({ kind: 'prefix', path: UI_PATH, handler: createUiHandler(core, { prefix: UI_PATH, token, onChange: () => sync() }) }));
+  });
+  const uiLink = () => {
+    const port = ctx.get?.('webServer')?.port;
+    return port ? `chara 界面：http://127.0.0.1:${port}${UI_PATH}/?t=${token}` : '没有找到 DSH 的网页服务，界面打不开。也可以在终端运行 npx chara ui。';
+  };
+
   const status = (inv) =>
     [
       `服务：${SERVICES.map((s) => `${ctx.get?.(s) ? '✓' : '✗'} ${s}`).join('  ')}`,
@@ -170,11 +183,12 @@ export function apply(ctx, _config, deps = {}) {
     c.effect(() =>
       c.commands.register({
         name: 'chara',
-        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | show | profile | status',
-        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | show | profile | status' },
+        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | show | profile | status | ui',
+        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | show | profile | status | ui' },
         handler: async (inv) => {
           const raw = String(inv.rawInput ?? '').trim();
           if (raw === 'status') return { kind: 'success', text: status(inv) };
+          if (raw === 'ui') return { kind: 'success', text: uiLink() };
           const r = core.command(raw);
           sync();
           let text = r.text;

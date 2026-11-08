@@ -15,6 +15,7 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
+      - run: npm run build
       - run: npm test
       - name: 标签必须与 package.json 的版本一致
         run: test "${GITHUB_REF_NAME}" = "v$(node -p "require('./package.json').version")"

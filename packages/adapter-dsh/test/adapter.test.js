@@ -21,6 +21,7 @@ function fakeCtx() {
     },
     commands: { register: (c) => commands.push(c) },
     tools: { register: (t) => tools.push(t) },
+    webServer: { port: 5173, routes: [], register(r) { this.routes.push(r); } },
   };
   const ctx = {
     logger: () => ({ info() {}, warn() {} }),
@@ -41,7 +42,7 @@ test('适配器：没有个体不注入；创建后注入本性与此刻；只�
   const home = mkdtempSync(path.join(tmpdir(), '适配器 '));
   const core = createCore({ home, host: 'dsh' });
   try {
-    const { ctx, live, emit, run } = fakeCtx();
+    const { ctx, live, emit, run, services } = fakeCtx();
     apply(ctx, {}, { core });
     assert.equal(live.sections.size + live.contexts.size, 0, '验收 1：没有个体时什么都不注册');
 
@@ -74,6 +75,10 @@ test('适配器：没有个体不注入；创建后注入本性与此刻；只�
     const show = (await run('show')).text;
     assert.ok(show.includes(live.sections.get('chara:nature').text()), 'show 与注入一致');
     assert.equal((await run('nope')).kind, 'error');
+
+    // 界面：挂在 webServer 的 /x-chara-soul，/chara ui 给出带令牌的链接
+    assert.equal(services.webServer.routes[0].path, '/x-chara-soul');
+    assert.match((await run('ui')).text, /^chara 界面：http:\/\/127\.0\.0\.1:5173\/x-chara-soul\/\?t=[0-9a-f]{32}$/);
   } finally {
     core.close();
     rmSync(home, { recursive: true, force: true });

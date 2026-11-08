@@ -17,6 +17,7 @@
 | 此刻：出生多久、现在几点、距上次见面多久 | 约定到期提醒 |
 | 记下每一句原话，按个体分开存 | |
 | 派分身办事，办完用自己的话转告，汇报记进个体的一生 | |
+| 本地网页界面：管理个体、编辑角色卡与画像、查看此刻 | |
 
 ## 安装到 DSH
 
@@ -30,7 +31,7 @@ https://github.com/Akashyc/dsh-chara-soul
 
 DSH 会下载最新 Release 里的 `dsh-chara-soul.tgz` 并启用。装好后在对话框里输入 `/chara status`，能看到服务列表和数据目录就成功了。更新时在插件页面重新安装即可，个体数据不受影响。
 
-插件页面找不到从 GitHub 安装的入口时，可以手动登记：先完全退出 DSH（托盘图标右键退出，只关窗口它还在后台运行），在 `%USERPROFILE%.dshprofilesdesktoppackage.json` 里加两处，再启动 DSH：
+插件页面找不到从 GitHub 安装的入口时，可以手动登记：先完全退出 DSH（托盘图标右键退出，只关窗口它还在后台运行），在 `%USERPROFILE%\.dsh\profiles\desktop\package.json` 里加两处，再启动 DSH：
 
 ```jsonc
 {
@@ -59,16 +60,18 @@ DSH 会下载最新 Release 里的 `dsh-chara-soul.tgz` 并启用。装好后在
 git clone https://github.com/Akashyc/dsh-chara-soul.git
 cd dsh-chara-soul
 npm install
+npm run build
 ```
+
+`npm run build` 构建网页界面，不构建时插件照常工作，只是 `/chara ui` 打开的页面会提示先构建。
 
 按上面手动登记的方式改 profile，依赖写成 `"dsh-chara-soul": "link:D:/path/to/dsh-chara-soul"`（指向仓库根目录），再在 PowerShell 里建目录链接：
 
 ```powershell
-New-Item -ItemType Junction -Path "$HOME.dshprofilesdesktop
-ode_modulesdsh-chara-soul" -Target "D:path	odsh-chara-soul"
+New-Item -ItemType Junction -Path "$HOME\.dsh\profiles\desktop\node_modules\dsh-chara-soul" -Target "D:\path\to\dsh-chara-soul"
 ```
 
-改了代码后，完全退出 DSH 再打开。
+改了代码后，完全退出 DSH 再打开；改了界面（`packages/ui/web/`）要先重新 `npm run build`。
 
 ## 开始使用
 
@@ -80,6 +83,11 @@ ode_modulesdsh-chara-soul" -Target "D:path	odsh-chara-soul"
 
 新建或导入后，回复里会给出角色卡 `card.yaml` 的位置。用编辑器改它，保存后下一轮生效。
 
+也可以用网页界面：输入 `/chara ui`，打开回复里的链接。界面里能新建、导入（选文件或拖到卡片上）、切换个体，换头像，编辑角色卡和用户画像，查看此刻。编辑角色卡时右侧实时预览本性和 2000 字预算，超出时标出会被截掉的字段。支持浅色、深色（跟随系统或手动切换），电脑和手机上都能用。
+
+- 链接带一个访问令牌，每次启动 DSH 重新生成，只在本机打开（`127.0.0.1`）
+- 界面里保存角色卡会按标准格式重写 `card.yaml`，你在文件里自己加的注释会丢掉；世界书条目原样保留
+
 | 命令 | 作用 |
 |---|---|
 | `/chara new <名字>` | 新建个体并切换过去 |
@@ -89,6 +97,7 @@ ode_modulesdsh-chara-soul" -Target "D:path	odsh-chara-soul"
 | `/chara show` | 显示本轮注入的本性与此刻、上次是否真的注入成功、别的插件注入了哪些段 |
 | `/chara profile` | 打开用户画像（所有个体共享） |
 | `/chara status` | 查看插件状态与数据目录 |
+| `/chara ui` | 给出网页界面的链接 |
 
 ### 会话与个体
 
@@ -145,17 +154,19 @@ bottom_lines: inherit      # 底线固定继承，角色卡里改不掉
 ```bash
 npx chara list
 npx chara show
+npx chara ui      # 不开 DSH 也能用网页界面，Ctrl+C 退出
 ```
 
 ## 开发
 
 ```bash
+npm run build
 npm test
 ```
 
-纯 ESM JavaScript，没有构建步骤；测试用 `node:test`，在 Windows、macOS、Linux 上跑。
+核心、适配器和命令行是纯 ESM JavaScript，不用构建；网页界面是 Vue 3，源码在 `packages/ui/web/`，用 Vite 构建到 `packages/ui/dist/`（不进仓库）。测试用 `node:test`，在 Windows、macOS、Linux 上跑。
 
-发版：改根目录 `package.json` 的 `version`，提交后打同名标签（如 `v0.1.0`）并推送，CI 测试通过后自动打包上传到 GitHub Release。
+发版：改根目录 `package.json` 的 `version`，提交后打同名标签（如 `v0.1.0`）并推送，CI 构建界面、测试通过后自动打包上传到 GitHub Release。
 
 ## 参考
 

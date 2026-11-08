@@ -1,16 +1,19 @@
 // 核心入口：不依赖任何宿主。适配器与 cli 都只通过这里访问（架构方案第四节）。
 import path from 'node:path';
-import { statSync, existsSync, readFileSync, copyFileSync } from 'node:fs';
+import { statSync, existsSync, readFileSync, copyFileSync, writeFileSync, rmSync } from 'node:fs';
 import YAML from 'yaml';
 import { dataHome, ensureHome } from './store/index.js';
 import { openRoster } from './roster/index.js';
 import { readCard, readYaml, writeText, validateCard, cardText, cardTemplate, profileTemplate } from './card/index.js';
 import { readTavernJson, fromTavern } from './card/tavern.js';
 import { buildNature, buildBrief } from './nature/index.js';
-import { floor5, zone, timeLines } from './chrono/index.js';
+import { floor5, zone, timeLines, daysBetween, relative } from './chrono/index.js';
 import { openLife } from './memory/life.js';
 
 const mtime = (f) => (existsSync(f) ? statSync(f).mtimeMs : 0);
+const CARD_FIELDS = ['name', 'appearance', 'personality', 'speech', 'first_mes', 'mes_example'];
+const PROFILE_FIELDS = ['name', 'call_me', 'relationship', 'appearance', 'traits', 'likes', 'taboos'];
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => typeof o?.[k] === 'string').map((k) => [k, o[k]]));
 
 /**
  * home：数据目录；now：时钟（测试可注入）；host：写进原话的来源宿主名。
@@ -19,6 +22,8 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
   const roster = openRoster(home, now);
   const beingDir = (id) => path.join(home, 'beings', id);
   const cardFile = (id) => path.join(beingDir(id), 'card.yaml');
+  const AVATARS = ['avatar.png', 'avatar.jpg', 'avatar.webp'];
+  const avatarOf = (id) => [...AVATARS, 'source.png'].map((f) => path.join(beingDir(id), f)).find((f) => existsSync(f)) ?? null;
   const profileFile = () => path.join(home, 'profiles', `${roster.getState('profile') ?? 'default'}.yaml`);
   const open = new Map(); // id → { life, nature, stamp, error }
 
@@ -163,10 +168,70 @@ export function createCore({ home = ensureHome(dataHome()), now = Date.now, host
     }
   }
 
+  const known = (id) => {
+    if (!roster.get(id)) throw new Error(`没有这个个体：${id}`);
+    return id;
+  };
+
+  /** 界面（packages/ui）用的读写：只碰角色卡、画像与个体状态，切换与导入仍走 command。 */
+  const view = {
+    beings() {
+      const cur = roster.current()?.id;
+      return roster.list().map((r) => {
+        const b = being(r.id);
+        let card = {};
+        try {
+          card = readCard(cardFile(r.id));
+        } catch {}
+        const born = b.life.meta('born_at');
+        const last = b.life.meta('last_user_at');
+        return {
+          id: r.id,
+          name: r.name,
+          current: r.id === cur,
+          bornDays: born == null ? null : daysBetween(born, now(), zone(b.life.meta('tz'))),
+          lastSeen: last == null ? null : relative(now() - last),
+          first_mes: card.first_mes ?? '',
+          lorebook: Array.isArray(card.lorebook) ? card.lorebook.length : 0,
+          avatar: avatarOf(r.id) ? statSync(avatarOf(r.id)).mtimeMs : 0, // 修改时间，页面拿来刷新缓存
+          error: b.error,
+        };
+      });
+    },
+    card: (id) => readCard(cardFile(known(id))),
+    /** 只改表单里的字段，lorebook 等其余字段原样保留；按标准模板重写，用户自己加的注释会丢。 */
+    saveCard(id, fields) {
+      const card = validateCard({ ...readCard(cardFile(known(id))), ...pick(fields, CARD_FIELDS) });
+      writeText(cardFile(id), cardText(card));
+      if (card.name !== roster.get(id).name) roster.rename(id, card.name);
+    },
+    /** 未保存的表单拼出来的本性，以及哪些字段被预算截掉。 */
+    preview(fields) {
+      const card = pick(fields, CARD_FIELDS);
+      const text = buildNature({ ...card, name: card.name?.trim() || '（未命名）' }, readYaml(profileFile()));
+      const cut = ['personality', 'speech', 'appearance'].filter((k) => card[k]?.trim() && !text.includes(card[k].trim()));
+      return { nature: text, length: [...text].length, budget: 2000, cut };
+    },
+    profile: () => readYaml(profileFile()) ?? {},
+    saveProfile(fields) {
+      writeText(profileFile(), `# 用户画像：所有个体共享，写你希望它们知道的自己
+
+${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
+    },
+    avatarFile: (id) => avatarOf(known(id)),
+    /** 换头像：认文件头，只收 PNG、JPG、WebP；导入时留下的 source.png 不动 */
+    saveAvatar(id, buf) {
+      const ext = buf.subarray(0, 4).toString('hex') === '89504e47' ? 'png' : buf.subarray(0, 3).toString('hex') === 'ffd8ff' ? 'jpg' : buf.subarray(8, 12).toString() === 'WEBP' ? 'webp' : '';
+      if (!ext) throw new Error('只支持 PNG、JPG、WebP 图片');
+      for (const f of AVATARS) rmSync(path.join(beingDir(known(id)), f), { force: true });
+      writeFileSync(path.join(beingDir(id), `avatar.${ext}`), buf);
+    },
+  };
+
   function close() {
     for (const b of open.values()) b.life.close();
     roster.close();
   }
 
-  return { nature, moment, afterTurn, envoyBrief, envoyReport, command, close, home };
+  return { nature, moment, afterTurn, envoyBrief, envoyReport, command, view, close, home };
 }

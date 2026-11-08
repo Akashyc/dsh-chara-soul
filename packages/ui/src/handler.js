@@ -1,0 +1,87 @@
+// 界面的请求处理器：Node 原生 (req, res)，既能挂在 DSH 的 webServer 上，也能由 cli 自己起服务。
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+// 页面由 Vite 构建到 dist/（npm run build）；静态文件不含数据，不需要令牌
+const DIST = new URL('../dist/', import.meta.url);
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const MAX_BODY = 20 * 1024 * 1024;
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const parts = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > MAX_BODY) reject(new Error('文件太大（上限 20 MB）'));
+      else parts.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(parts)));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * core：createCore() 的返回值；prefix：挂载路径（DSH 里是 /x-chara-soul，独立运行时为空）；
+ * token：访问令牌；onChange：新建、切换、导入、改卡之后调用（DSH 适配器用它重新登记注入段）。
+ */
+export function createUiHandler(core, { prefix = '', token, onChange = () => {} }) {
+  if (!token) throw new Error('界面需要访问令牌');
+  return async (req, res) => {
+    const send = (code, body, type = 'application/json; charset=utf-8') => {
+      res.statusCode = code;
+      res.setHeader('Content-Type', type);
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
+    };
+    try {
+      const url = new URL(req.url ?? '/', 'http://x');
+      const route = url.pathname.slice(prefix.length) || '/';
+      const q = (k) => url.searchParams.get(k) ?? '';
+      const json = async () => JSON.parse((await readBody(req)).toString('utf8') || '{}');
+      const done = (r) => (onChange(), send(r.ok ? 200 : 400, r.ok ? r : { error: r.text }));
+      const is = (method, p) => req.method === method && route === p;
+
+      if (req.method === 'GET' && (route === '/' || /^\/assets\/[\w.-]+$/.test(route))) {
+        const f = new URL(route === '/' ? 'index.html' : route.slice(1), DIST);
+        if (!existsSync(f)) return send(route === '/' ? 503 : 404, route === '/' ? '界面还没构建：在项目根目录运行 npm run build' : '没有这个文件', 'text/plain; charset=utf-8');
+        return send(200, readFileSync(f), TYPES[path.extname(f.pathname)] ?? 'application/octet-stream');
+      }
+      // 页面本身不含数据，接口一律要令牌。写操作只认请求头：别的网页能骗浏览器发表单，却加不了自定义请求头
+      const headerOk = req.headers['x-chara-token'] === token;
+      if (!headerOk && !(req.method === 'GET' && q('t') === token)) return send(403, { error: '令牌不对，请从 /chara ui 给出的链接打开' });
+
+      if (is('GET', '/api/state')) return send(200, { beings: core.view.beings(), show: core.command('show').text });
+      if (is('GET', '/api/avatar')) {
+        const f = core.view.avatarFile(q('id'));
+        return f ? send(200, readFileSync(f), { '.jpg': 'image/jpeg', '.webp': 'image/webp' }[path.extname(f)] ?? 'image/png') : send(404, { error: '没有头像' });
+      }
+      if (is('GET', '/api/card')) return send(200, core.view.card(q('id')));
+      if (is('GET', '/api/profile')) return send(200, core.view.profile());
+      if (!headerOk) return send(403, { error: '写操作需要请求头令牌' });
+
+      if (is('POST', '/api/preview')) return send(200, core.view.preview(await json()));
+      if (is('PUT', '/api/card')) return core.view.saveCard(q('id'), await json()), onChange(), send(200, { ok: true });
+      if (is('PUT', '/api/avatar')) return core.view.saveAvatar(q('id'), await readBody(req)), send(200, { ok: true });
+      if (is('PUT', '/api/profile')) return core.view.saveProfile(await json()), onChange(), send(200, { ok: true });
+      if (is('POST', '/api/new')) return done(core.command(`new ${String((await json()).name ?? '').trim()}`));
+      if (is('POST', '/api/use')) return done(core.command(`use ${String((await json()).id ?? '').trim()}`));
+      if (is('POST', '/api/import')) {
+        const name = path.basename(q('name'));
+        if (!/\.(png|json|ya?ml)$/i.test(name)) return send(400, { error: '只支持 PNG、JSON、YAML 角色卡' });
+        const dir = mkdtempSync(path.join(tmpdir(), 'chara-import-'));
+        try {
+          const file = path.join(dir, name);
+          writeFileSync(file, await readBody(req));
+          return done(core.command(`import "${file}"`));
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+      return send(404, { error: '没有这个接口' });
+    } catch (e) {
+      return send(400, { error: e?.message ?? String(e) });
+    }
+  };
+}
