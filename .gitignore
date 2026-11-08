@@ -14,4 +14,3 @@ docs/
 
 # 私有：开发用的样本导出脚本
 scripts/export-samples.mjs
-packages/ui/dist/

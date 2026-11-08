@@ -29,9 +29,9 @@
 https://github.com/Akashyc/dsh-chara-soul
 ```
 
-DSH 会下载最新 Release 里的 `dsh-chara-soul.tgz` 并启用。装好后在对话框里输入 `/chara status`，能看到服务列表和数据目录就成功了。更新时在插件页面重新安装即可，个体数据不受影响。
+DSH 会装上仓库 `main` 分支的最新代码（依赖写成 `github:Akashyc/dsh-chara-soul`），构建好的网页界面已包含在内。装好后在对话框里输入 `/chara status`，能看到服务列表和数据目录就成功了。更新时在插件页面重新安装即可，个体数据不受影响。
 
-插件页面找不到从 GitHub 安装的入口时，可以手动登记：先完全退出 DSH（托盘图标右键退出，只关窗口它还在后台运行），在 `%USERPROFILE%\.dsh\profiles\desktop\package.json` 里加两处，再启动 DSH：
+插件页面找不到从 GitHub 安装的入口，或想固定装某个发布版本时，可以手动登记（下面的地址是最新 Release 的安装包）：先完全退出 DSH（托盘图标右键退出，只关窗口它还在后台运行），在 `%USERPROFILE%\.dsh\profiles\desktop\package.json` 里加两处，再启动 DSH：
 
 ```jsonc
 {
@@ -63,7 +63,7 @@ npm install
 npm run build
 ```
 
-`npm run build` 构建网页界面，不构建时插件照常工作，只是 `/chara ui` 打开的页面会提示先构建。
+仓库里已带着构建好的网页界面；`npm run build` 只在改了界面源码后需要。
 
 按上面手动登记的方式改 profile，依赖写成 `"dsh-chara-soul": "link:D:/path/to/dsh-chara-soul"`（指向仓库根目录），再在 PowerShell 里建目录链接：
 
@@ -172,7 +172,7 @@ npm run build
 npm test
 ```
 
-核心、适配器和命令行是纯 ESM JavaScript，不用构建；网页界面是 Vue 3，源码在 `packages/ui/web/`，用 Vite 构建到 `packages/ui/dist/`（不进仓库）。测试用 `node:test`，在 Windows、macOS、Linux 上跑。
+核心、适配器和命令行是纯 ESM JavaScript，不用构建；网页界面是 Vue 3，源码在 `packages/ui/web/`，用 Vite 构建到 `packages/ui/dist/`。DSH 插件页装的是源码、不跑构建，所以 `dist/` 提交进仓库；改了界面要 `npm run build` 后一起提交，CI 会检查它是不是最新的。测试用 `node:test`，在 Windows、macOS、Linux 上跑。
 
 发版：改根目录 `package.json` 的 `version`，提交后打同名标签（如 `v0.1.0`）并推送，CI 构建界面、测试通过后自动打包上传到 GitHub Release。
 

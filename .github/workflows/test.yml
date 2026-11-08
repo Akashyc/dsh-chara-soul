@@ -15,3 +15,6 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm ci
       - run: npm test
+      # DSH 插件页按 github: 装源码，不跑构建，所以 dist/ 提交进仓库；这里确认它和 web/ 源码对得上
+      - if: runner.os == 'Linux'
+        run: npm run build && git add -A packages/ui/dist && git diff --cached --exit-code --stat packages/ui/dist || (echo "::error::packages/ui/dist 不是最新的，请运行 npm run build 后一起提交" && exit 1)
