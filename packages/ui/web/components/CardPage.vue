@@ -4,6 +4,7 @@ import { state, current, api, load, toast, guard, avatarUrl } from '../store.js'
 import Avatar from './Avatar.vue';
 import AvatarCrop from './AvatarCrop.vue';
 import Fields from './Fields.vue';
+import Select from './Select.vue';
 
 const CARD = [
   ['name', '名字', '必填', 'input'],
@@ -20,11 +21,20 @@ const editing = ref(current.value?.id ?? state.beings[0]?.id ?? null);
 const being = computed(() => state.beings.find((b) => b.id === editing.value));
 const form = reactive({});
 const pv = ref(null);
+const saved = ref(''); // 上次读入或保存时的表单快照，用来判断有没有没保存的改动
+const dirty = computed(() => JSON.stringify(form) !== saved.value);
+const beingOptions = computed(() => state.beings.map((b) => ({ value: b.id, label: b.name, being: b })));
 
+/**
+ * 读入一个个体的角色卡；有没保存的改动时先确认，免得切走就丢。
+ * @param id 个体 id
+ */
 const open = guard(async (id) => {
+  if (id !== editing.value && dirty.value && !confirm('角色卡有改动还没保存，切换会丢掉这些改动，继续吗？')) return;
   editing.value = id;
   const card = await api('GET', `card?id=${encodeURIComponent(id)}`);
   for (const [k] of CARD) form[k] = typeof card[k] === 'string' ? card[k].replace(/\n$/, '') : '';
+  saved.value = JSON.stringify(form);
 });
 if (editing.value) open(editing.value);
 
@@ -37,6 +47,7 @@ watch(form, () => {
 
 const save = guard(async () => {
   await api('PUT', `card?id=${encodeURIComponent(editing.value)}`, { ...form });
+  saved.value = JSON.stringify(form);
   toast('已保存，下一轮生效');
   await load();
 });
@@ -90,18 +101,16 @@ const savePortrait = guard(async () => {
   <div v-else class="editor">
     <div class="panel">
       <div class="field">
-        <label>编辑哪个个体</label>
-        <div class="pick" role="radiogroup" aria-label="编辑哪个个体">
-          <button v-for="b in state.beings" :key="b.id" :class="['chip', { on: b.id === editing }]" type="button" role="radio" :aria-checked="b.id === editing" @click="open(b.id)">
-            <Avatar :being="b" size="sm" />{{ b.name }}
-          </button>
-        </div>
+        <label for="card-being">编辑哪个个体</label>
+        <Select id="card-being" :model-value="editing" :options="beingOptions" @update:model-value="open">
+          <template #option="{ option }"><Avatar :being="option.being" size="sm" />{{ option.label }}</template>
+        </Select>
       </div>
       <div class="field">
         <label>头像</label>
         <div class="row" style="gap: 14px; flex-wrap: wrap">
           <Avatar v-if="being" :being="being" />
-          <button class="btn" type="button" @click="file.click()">换头像…</button>
+          <button class="btn" type="button" @click="file.click()">换头像</button>
           <span class="muted">PNG、JPG、WebP，选好后裁剪</span>
         </div>
         <input ref="file" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="pickAvatar">
@@ -115,7 +124,7 @@ const savePortrait = guard(async () => {
           <img :src="avatarUrl(being, 'portrait')" alt="">
         </button>
         <div class="row" style="gap: 14px; flex-wrap: wrap">
-          <button class="btn" type="button" @click="portraitFile.click()">换形象图…</button>
+          <button class="btn" type="button" @click="portraitFile.click()">换形象图</button>
           <span class="muted">大图原样保存，点图放大</span>
         </div>
         <input ref="portraitFile" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="savePortrait">
@@ -124,9 +133,12 @@ const savePortrait = guard(async () => {
         </dialog>
       </div>
       <Fields v-model="form" :spec="CARD" :cut="pv?.cut" />
-      <div class="actions">
-        <button class="btn primary" type="button" @click="save">保存</button>
-        <span class="muted">保存后下一轮生效。会按标准格式重写 card.yaml，你自己加的注释会丢掉；世界书条目原样保留。</span>
+      <p class="muted">保存后下一轮生效。会按标准格式重写 card.yaml，你自己加的注释会丢掉；世界书条目原样保留。</p>
+
+      <!-- 保存条 -->
+      <div class="actions save-bar">
+        <button class="btn primary" type="button" :disabled="!dirty" @click="save">保存</button>
+        <span :class="dirty ? 'dirty' : 'muted'">{{ dirty ? '有改动还没保存' : '已保存' }}</span>
       </div>
     </div>
     <div class="panel preview">

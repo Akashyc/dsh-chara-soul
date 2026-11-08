@@ -103,7 +103,7 @@ New-Item -ItemType Junction -Path "$HOME\.dsh\profiles\desktop\node_modules\dsh-
 
 ### 侧栏面板（DSH）
 
-装好插件、重启 DSH 后，左侧边栏会多一个「灵魂狭间」图标，点开就是同一套界面，不用再打开浏览器标签页。面板里顶部有刷新和「新窗口打开」两个按钮，明暗主题跟随 DSH。
+装好插件、重启 DSH 后，左侧边栏会多一个「灵魂狭间」图标，点开就是同一套界面，不用再打开浏览器标签页。明暗主题跟随 DSH。
 
 界面跑在 iframe 里：样式和宿主的全局 CSS 互相不污染，客户端插件崩了也只崩这一块面板。同一份构建产物在独立页（`/chara ui`）、DSH 侧栏、以及别的宿主外壳里都是同一套流程。
 
@@ -162,7 +162,7 @@ bottom_lines: inherit      # 底线固定继承，角色卡里改不掉
 | macOS | `~/Library/Application Support/dsh-chara-soul` |
 | Linux | `$XDG_DATA_HOME/dsh-chara-soul`，默认 `~/.local/share/dsh-chara-soul` |
 
-想换位置，在界面「设置」里填新目录迁移：先复制、核对无误才切换，旧目录留着，确认没问题再点删除；迁移前关掉终端里的 `npx chara ui`，不要选 OneDrive、坚果云等网盘同步文件夹。也可以设置环境变量 `CHARA_SOUL_HOME` 指定位置（优先于设置页）。数据和 DSH 的目录分开，重装 DSH 不受影响；要从零开始，退出 DSH 后删掉这个目录。
+想换位置，在界面「设置」里填新目录（或点「选择文件夹」）迁移：先复制、核对无误才切换，旧目录留着，确认没问题再点删除；迁移前关掉终端里的 `npx chara ui`，不要选 OneDrive、坚果云等网盘同步文件夹。也可以设置环境变量 `CHARA_SOUL_HOME` 指定位置（优先于设置页）。数据和 DSH 的目录分开，重装 DSH 不受影响；要从零开始，退出 DSH 后删掉这个目录。
 
 每个个体一个目录（`beings/<个体id>/`），里面是角色卡 `card.yaml` 和这个个体的一生 `life.db`（SQLite）。离开 DSH 也能用命令行查看，在代码目录里执行：
 

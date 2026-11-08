@@ -2,6 +2,7 @@
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pickFolder as systemPicker } from './pick-folder.js';
 
 // 页面由 Vite 构建到 dist/（npm run build）；静态文件不含数据，不需要令牌
 const DIST = new URL('../dist/', import.meta.url);
@@ -25,9 +26,10 @@ function readBody(req) {
 /**
  * core：createCore() 的返回值；prefix：挂载路径（DSH 里是 /x-chara-soul，独立运行时为空）；
  * token：访问令牌；onChange：新建、切换、导入、改卡之后调用（DSH 适配器用它重新登记注入段）。
- * presets：列出宿主已注册预设的函数（DSH 适配器提供），没有时设置页退回文本框。
+ * presets：列出宿主已注册预设的函数（DSH 适配器提供）；返回 null 时设置页不显示「分身用的预设」。
+ * pickFolder：弹「选择文件夹」对话框，测试时换成假的。
  */
-export function createUiHandler(core, { prefix = '', token, onChange = () => {}, presets = async () => null }) {
+export function createUiHandler(core, { prefix = '', token, onChange = () => {}, presets = async () => null, pickFolder = systemPicker }) {
   if (!token) throw new Error('界面需要访问令牌');
   return async (req, res) => {
     const send = (code, body, type = 'application/json; charset=utf-8') => {
@@ -76,6 +78,7 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
       if (is('PUT', '/api/settings')) return core.view.saveSettings(await json()), send(200, { ok: true });
       // 换数据目录之后本性要从新位置读，所以也调 onChange
       if (is('POST', '/api/home')) return send(200, core.moveHome((await json()).to)), onChange();
+      if (is('POST', '/api/pick-folder')) return send(200, { path: await pickFolder() });
       if (is('DELETE', '/api/home')) return core.removeOldHome(), send(200, { ok: true });
       if (is('POST', '/api/new')) return done(core.command(`new ${String((await json()).name ?? '').trim()}`));
       if (is('POST', '/api/use')) return done(core.command(`use ${String((await json()).id ?? '').trim()}`));

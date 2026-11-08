@@ -140,16 +140,16 @@ h2 { margin: 4px 0 18px; font-size: 24px; letter-spacing: .03em; }
 }
 
 /* 表单 */
-input, select, textarea {
+input, textarea {
   width: 100%; font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--input-border);
   border-radius: 18px; padding: 9px 14px; box-shadow: inset 0 2px 4px rgba(0,0,0,.05); transition: border-color .3s ease, box-shadow .3s ease;
 }
-input, select { border-radius: 999px; }
+input { border-radius: 999px; }
 textarea { resize: vertical; min-height: 84px; field-sizing: content; max-height: 420px; }
-input:focus, select:focus, textarea:focus { border-color: var(--pink); box-shadow: 0 0 0 3px rgba(255,105,180,.2); }
+/* 能随内容自动长高时就不要右下角的拖拽角，超过上限出滚动条 */
+@supports (field-sizing: content) { textarea { resize: none; } }
+input:focus, textarea:focus { border-color: var(--pink); box-shadow: 0 0 0 3px rgba(255,105,180,.2); }
 .cut { border-color: #ff6b8a !important; box-shadow: 0 0 0 3px rgba(255,107,138,.25) !important; }
-.pick { display: flex; flex-wrap: wrap; gap: 8px; }
-.pick .chip { padding: 4px 14px 4px 4px; font-weight: 700; }
 /* 滚动条：细的镭射渐变 */
 @supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: var(--pink) transparent; } }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -161,7 +161,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--pink); box-shado
 .editor { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 22px; align-items: start; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .field > label { font-weight: 700; }
-.field .muted { margin-top: -4px; }
+.field > .muted { margin-top: 2px; line-height: 1.5; }
 .preview { position: sticky; top: 90px; }
 .meter { height: 14px; border-radius: 999px; background: var(--input); box-shadow: inset 0 2px 4px rgba(0,0,0,.08); overflow: hidden; border: 1px solid var(--input-border); }
 .meter i { display: block; height: 100%; background: var(--holo); border-radius: 999px; transition: width .4s ease-out; }
@@ -207,6 +207,7 @@ details summary { cursor: pointer; font-weight: 700; margin: 18px 0 10px; }
   .avatar { width: 64px; height: 64px; }
   .avatar.lg { width: 110px; height: 110px; font-size: 44px; }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .save-bar { bottom: calc(84px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
@@ -265,3 +266,43 @@ details summary { cursor: pointer; font-weight: 700; margin: 18px 0 10px; }
 
 /* 设置页：完整路径，长了就折行 */
 .path { padding: 8px 14px; border-radius: 12px; background: var(--input); border: 1px solid var(--input-border); word-break: break-all; font-size: 13px; }
+
+/* 保存条：贴在面板底部跟着滚动，有改动时高亮提醒 */
+.save-bar {
+  position: sticky; bottom: 12px; z-index: 5; margin-top: 8px; padding: 10px 14px;
+  border: 1px solid var(--panel-border); border-radius: 999px; background: var(--metal); box-shadow: var(--glow), var(--inset);
+}
+
+.save-bar .dirty { color: var(--pink); font-weight: 700; }
+
+/* 下拉选择 */
+.select { position: relative; }
+
+/* 面板有 backdrop-filter，自成层叠上下文；展开时把所在面板抬上来，列表才不会被后面的面板盖住 */
+.panel:has(.select.open) { position: relative; z-index: 20; }
+
+.select-trigger {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 6px 14px; text-align: left;
+  font: inherit; color: var(--text); cursor: pointer; background: var(--input); border: 1px solid var(--input-border); border-radius: 999px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.05); transition: border-color .3s ease, box-shadow .3s ease;
+}
+
+.select.open .select-trigger, .select-trigger:focus { border-color: var(--pink); box-shadow: 0 0 0 3px rgba(255,105,180,.2); }
+
+.select-value { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+.select-arrow { flex: none; width: 8px; height: 8px; margin: -4px 4px 0; border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .2s ease; }
+
+.select.open .select-arrow { margin-top: 4px; transform: rotate(-135deg); }
+
+.select-list {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 30; margin: 0; padding: 6px; list-style: none;
+  max-height: 300px; overflow: hidden auto; border: 1px solid var(--panel-border); border-radius: 18px;
+  background: var(--panel), var(--card-base); box-shadow: var(--glow-strong);
+}
+
+.select-list li { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.select-list li.active { background: rgba(255,105,180,.16); }
+
+.select-list li[aria-selected="true"] { font-weight: 700; color: var(--pink); }

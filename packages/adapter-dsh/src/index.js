@@ -62,7 +62,7 @@ export function apply(ctx, _config, deps = {}) {
   /** 某个会话正在用的预设 id；宿主没有预设服务时退回会话头里记的，都拿不到时为 undefined。 */
   const presetOf = (agent) => ctx.get?.('agentPresets')?.composedPreset?.(agent?.ctx) ?? agent?.session?.header?.agentPreset;
 
-  /** 已注册、能用的预设，给设置页的下拉框；拿不到列表时返回 null，界面退回文本框。 */
+  /** 已注册、能用的预设，给设置页的下拉框；拿不到列表时返回 null，设置页不显示这一栏。 */
   const listPresets = async () => {
     const list = await ctx.get?.('agentPresets')?.list?.();
     return Array.isArray(list) ? list.filter((p) => !p.broken).map((p) => ({ id: p.id, name: p.name ?? BUILT_IN[p.id] ?? p.id })) : null;

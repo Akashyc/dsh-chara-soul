@@ -11,7 +11,7 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
   const home = mkdtempSync(path.join(tmpdir(), '界面 '));
   const core = createCore({ home, host: 'test' });
   let changes = 0;
-  const server = createServer(createUiHandler(core, { prefix: '/x', token: 'tk', onChange: () => changes++ }));
+  const server = createServer(createUiHandler(core, { prefix: '/x', token: 'tk', onChange: () => changes++, pickFolder: async () => 'D:/选好的' }));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}/x`;
   const call = async (method, route, body, headers = { 'x-chara-token': 'tk' }) => {
@@ -86,13 +86,15 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
 
     const s = (await call('GET', '/api/settings')).data;
     assert.equal(s.envoyPreset, 'standard');
-    assert.equal(s.presets, null, '拿不到预设列表时界面退回文本框');
+    assert.equal(s.presets, null, '宿主列不出预设时，设置页不显示分身预设');
     assert.equal(s.home.source, 'env', '没有指向文件的核心不能换目录');
     assert.equal((await call('PUT', '/api/settings', { envoyPreset: 'ptc' })).status, 200);
     assert.equal((await call('GET', '/api/settings')).data.envoyPreset, 'ptc');
     assert.equal((await call('PUT', '/api/settings', { envoyPreset: '../x' })).status, 400);
     assert.match((await call('POST', '/api/home', { to: path.join(home, '..', '别处') })).data.error, /环境变量/);
     assert.equal((await call('DELETE', '/api/home')).status, 400);
+    assert.equal((await call('POST', '/api/pick-folder?t=tk', undefined, {})).status, 403, '弹对话框也只认请求头');
+    assert.deepEqual((await call('POST', '/api/pick-folder')).data, { path: 'D:/选好的' });
   } finally {
     server.close();
     core.close();

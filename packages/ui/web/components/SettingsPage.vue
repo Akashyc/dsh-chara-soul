@@ -1,11 +1,33 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { api, load, toast, guard } from '../store.js';
+import Select from './Select.vue';
 
 const settings = ref(null); // { envoyPreset, presets: [{ id, name }] | null, home: { home, source, previous, warning } }
 const envoyPreset = ref('');
 const target = ref('');
 const moving = ref(false);
+const picking = ref(false);
+
+// 存的值不在已注册列表里时也列出来，免得显示成空白
+const presetOptions = computed(() => {
+  const list = settings.value.presets.map((p) => ({ value: p.id, label: `${p.name}（${p.id}）` }));
+
+  return list.some((o) => o.value === envoyPreset.value) ? list : [{ value: envoyPreset.value, label: `${envoyPreset.value}（没有注册）` }, ...list];
+});
+
+/** 弹系统的选择文件夹对话框，选中的路径填进输入框；取消则不变。 */
+const browse = guard(async () => {
+  picking.value = true;
+
+  try {
+    const { path } = await api('POST', 'pick-folder');
+
+    if (path) target.value = path;
+  } finally {
+    picking.value = false;
+  }
+});
 
 /** 读设置与数据目录现状。 */
 const refresh = guard(async () => {
@@ -53,15 +75,11 @@ const removeOld = guard(async () => {
 <template>
   <h2>设置</h2>
   <template v-if="settings">
-    <!-- 分身用的预设 -->
-    <div class="panel" style="max-width: 760px; margin-bottom: 18px">
+    <!-- 分身用的预设：只有宿主列得出预设（目前只有 DSH）才有意义，独立运行时不显示 -->
+    <div v-if="settings.presets?.length" class="panel" style="max-width: 760px; margin-bottom: 18px">
       <div class="field">
         <label for="envoy-preset">分身用的预设</label>
-        <select v-if="settings.presets?.length" id="envoy-preset" v-model="envoyPreset">
-          <option v-if="!settings.presets.some((p) => p.id === envoyPreset)" :value="envoyPreset">{{ envoyPreset }}（没有注册）</option>
-          <option v-for="p in settings.presets" :key="p.id" :value="p.id">{{ p.name }}（{{ p.id }}）</option>
-        </select>
-        <input v-else id="envoy-preset" v-model="envoyPreset" placeholder="预设 id，如 standard">
+        <Select id="envoy-preset" v-model="envoyPreset" :options="presetOptions" />
         <span class="muted">会话选「角色灵魂」预设时，本体工具很少，派出的分身改用这里的预设拿全套工具；会话用别的预设时，分身照旧跟着会话走。</span>
       </div>
       <div class="actions"><button class="btn primary" type="button" @click="savePreset">保存</button></div>
@@ -78,7 +96,10 @@ const removeOld = guard(async () => {
 
       <div v-if="settings.home.source !== 'env'" class="field">
         <label for="home-target">迁移到</label>
-        <input id="home-target" v-model="target" placeholder="空目录或还不存在的目录的完整路径，如 D:\灵魂" @keydown.enter="moveHome">
+        <div class="row">
+          <input id="home-target" v-model="target" placeholder="空目录或还不存在的目录的完整路径，如 D:\灵魂" @keydown.enter="moveHome">
+          <button class="btn" type="button" :disabled="picking" @click="browse">选择文件夹</button>
+        </div>
         <span class="muted">只复制不移动，核对无误后才切换。不要选网盘同步文件夹（OneDrive、坚果云等），同步会弄坏数据库。</span>
       </div>
       <div v-if="settings.home.source !== 'env'" class="actions">

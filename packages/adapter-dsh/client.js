@@ -74,7 +74,7 @@ window.__ModuleLoader__.load({
             return base + '/?t=' + encodeURIComponent(data.token) + '&embed=1'
         }
 
-        /** 面板：工具条（标题、刷新、新窗口）+ 内嵌页面。出问题时自己给出诊断与退路，不把白屏留给用户。 */
+        /** 面板：标题条 + 内嵌页面。出问题时自己给出诊断与退路，不把白屏留给用户。 */
         function SoulPanel() {
             const [attempt, setAttempt] = React.useState(0)
             const [phase, setPhase] = React.useState('loading')
@@ -130,16 +130,10 @@ window.__ModuleLoader__.load({
             }, [])
 
             const reload = function () { setAttempt(function (n) { return n + 1 }) }
-            const detach = function () {
-                if (!url) return
-                try { window.open(url.replace('&embed=1', ''), '_blank', 'noopener') } catch (e) { /* 弹窗被拦 */ }
-            }
 
             return h('div', { className: 'chara-panel', style: S.root },
                 h('div', { style: S.bar },
                     h('span', { style: S.grow }, '灵魂狭间'),
-                    h('button', { type: 'button', style: S.btn, onClick: reload, title: '重新载入界面' }, '刷新'),
-                    h('button', { type: 'button', style: S.btn, onClick: detach, title: '在新窗口打开（界面里所有功能都能用）' }, '新窗口'),
                 ),
                 h('div', { style: S.body },
                     phase === 'ready' && url

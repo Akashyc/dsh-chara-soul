@@ -108,7 +108,7 @@ function dropped(e) {
         </div>
         <div class="field" style="margin-bottom: 0">
           <label>导入角色卡</label>
-          <button class="btn" type="button" @click="file.click()">选择文件…</button>
+          <button class="btn" type="button" @click="file.click()">选择文件</button>
           <input ref="file" type="file" accept=".png,.json,.yaml,.yml" hidden @change="picked">
           <span class="muted">支持本项目的 YAML，以及 SillyTavern 的 JSON / PNG；电脑上也可以直接拖到卡片上。</span>
         </div>
