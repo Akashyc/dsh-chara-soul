@@ -166,10 +166,9 @@ export function apply(ctx, _config, deps = {}) {
         defineTool({
           name: 'chara_envoy',
           description: '派一个分身去办手边没有工具办的事（写文件、跑命令等），或大批量、耗时长的活。立即返回；分身办完后你会收到它的汇报，核对后再用自己的话转告用户。派出当轮的回复里必须用一句话告诉用户你派它去办什么、大概多久——用户看不到工具返回，只能看到你说的话。',
+          // 只收一个参数：flash 模型先写别的参数时，偶尔把后面的参数吞进第一个值里，task 就丢了（M10 实测）
           parameters: {
-            task: { type: 'string', required: true, description: '要办的事，写清对象、范围与具体要求' },
-            acceptance: { type: 'string', description: '怎样算办完' },
-            context: { type: 'string', description: '分身需要知道的用户偏好与背景' },
+            task: { type: 'string', required: true, description: '要办的事：对象、范围与具体要求；怎样算办完；分身需要知道的用户偏好与背景' },
           },
           output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
           async execute(args, exec) {
