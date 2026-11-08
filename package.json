@@ -1,6 +1,6 @@
 {
   "name": "dsh-chara-soul",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "license": "MIT",
   "description": "角色灵魂引擎：给 DeepSeek 一段完整的一生（DSH 插件）",
