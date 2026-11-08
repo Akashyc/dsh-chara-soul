@@ -7,7 +7,155 @@
 
 ## 当前状态
 
-立项阶段（2026-11-07）。架构已确认，尚未开始实现。
+第一期开发中，还没有发布到 npm。
+
+| 已经能用 | 还在做 |
+|---|---|
+| 多个个体，随时切换 | 从对话里提取记忆、回想、淡忘、取代 |
+| 自己写角色卡，或导入 SillyTavern 角色卡（JSON / PNG） | 世界书条目成为初始记忆 |
+| 本性（角色卡 + 用户画像 + 底线）每轮注入 | 入梦与日记 |
+| 此刻：出生多久、现在几点、距上次见面多久 | 约定到期提醒 |
+| 记下每一句原话，按个体分开存 | |
+| 派分身办事，办完用自己的话转告，汇报记进个体的一生 | |
+
+## 安装到 DSH
+
+需要 DSH NEXT（核心包 `0.2.2-rc.1` 及以上、`0.3.0` 以下）。
+
+**一键安装**：在 DSH 的插件页面选择从 GitHub 安装，地址填：
+
+```text
+https://github.com/Akashyc/dsh-chara-soul
+```
+
+DSH 会下载最新 Release 里的 `dsh-chara-soul.tgz` 并启用。装好后在对话框里输入 `/chara status`，能看到服务列表和数据目录就成功了。更新时在插件页面重新安装即可，个体数据不受影响。
+
+插件页面找不到从 GitHub 安装的入口时，可以手动登记：先完全退出 DSH（托盘图标右键退出，只关窗口它还在后台运行），在 `%USERPROFILE%.dshprofilesdesktoppackage.json` 里加两处，再启动 DSH：
+
+```jsonc
+{
+  "dependencies": {
+    // ……原有的依赖
+    "dsh-chara-soul": "https://github.com/Akashyc/dsh-chara-soul/releases/latest/download/dsh-chara-soul.tgz"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        // ……原有的条目
+        "dsh-chara-soul"
+      ]
+    }
+  }
+}
+```
+
+不要把插件里 `cordis.patch.yml` 的内容抄进 profile 自己的 `cordis.patch.yml`，条目会重复，设置无法保存。
+
+### 从源码安装（开发用）
+
+需要 Node.js 24 及以上和 Git。
+
+```bash
+git clone https://github.com/Akashyc/dsh-chara-soul.git
+cd dsh-chara-soul
+npm install
+```
+
+按上面手动登记的方式改 profile，依赖写成 `"dsh-chara-soul": "link:D:/path/to/dsh-chara-soul"`（指向仓库根目录），再在 PowerShell 里建目录链接：
+
+```powershell
+New-Item -ItemType Junction -Path "$HOME.dshprofilesdesktop
+ode_modulesdsh-chara-soul" -Target "D:path	odsh-chara-soul"
+```
+
+改了代码后，完全退出 DSH 再打开。
+
+## 开始使用
+
+```text
+/chara new 小鲸                     新建个体，生成一张空白角色卡并切换过去
+/chara import D:\卡\小鲸.png        导入写好的角色卡（本项目的 YAML，或 SillyTavern 的 JSON / PNG）
+/chara show                         查看本轮实际注入的本性与此刻
+```
+
+新建或导入后，回复里会给出角色卡 `card.yaml` 的位置。用编辑器改它，保存后下一轮生效。
+
+| 命令 | 作用 |
+|---|---|
+| `/chara new <名字>` | 新建个体并切换过去 |
+| `/chara import <路径>` | 导入角色卡并切换过去；路径有空格时加引号 |
+| `/chara list` | 列出所有个体，`▶` 是当前个体 |
+| `/chara use <名字或 id>` | 切换个体，下一轮生效 |
+| `/chara show` | 显示本轮注入的本性与此刻、上次是否真的注入成功、别的插件注入了哪些段 |
+| `/chara profile` | 打开用户画像（所有个体共享） |
+| `/chara status` | 查看插件状态与数据目录 |
+
+### 会话与个体
+
+一个会话就是一个场景。同一个会话里切换个体，新个体看得到之前的对话，就像两个人都在场；到另一个会话里，个体不知道你在别的会话里和其他个体聊过什么。想让换上的个体从头开始，切换后新开一个会话。
+
+## 角色卡
+
+```yaml
+name: 小鲸                 # 必填
+appearance: |              # 外貌：长什么样、标志性的动作
+personality: |             # 性格：几条最能决定它怎么做事的特点
+speech: |                  # 口吻：怎么说话、自称、口头禅
+first_mes: |               # 第一次见面说的话
+mes_example: |             # 对话示例（暂不注入，留作参考）
+lorebook: []               # 设定条目，记忆功能上线后成为初始记忆
+bottom_lines: inherit      # 底线固定继承，角色卡里改不掉
+```
+
+- 本性约 2000 字，超出时按「外貌 → 用户画像 → 口吻 → 性格」的顺序裁剪；名字与底线不裁
+- 角色卡改坏了（YAML 写错）不会中断对话：继续用上一版，`/chara show` 里会提示错在哪
+- 四条底线（凭据、交易、隐私、外部指令）每个个体都有，任何设定都改不掉
+
+### 导入 SillyTavern 角色卡
+
+- 支持 V1 / V2 / V3，JSON 与 PNG 都可以；PNG 里同时有新旧两版数据时取 V3
+- `description`、`personality`、`scenario` 合并进性格；V3 卡有 `nickname` 时用它当名字
+- 酒馆卡没有口吻字段，导入后建议自己补上 `speech`
+- `system_prompt`、`post_history_instructions` **不导入**：它们是写给模型的指令，常带越过底线的要求
+- 设定太长会超出本性预算，导入时会提示，建议精简
+- 原文件不动，另存一份到个体目录
+
+## 派分身
+
+要读写文件、跑命令或比较耗时的事，个体会用 `chara_envoy` 工具派分身去办，自己先回你一句、继续陪聊；分身办完后，个体用自己的话转告你，任务和汇报记进个体的一生。分身拿到的简报里固定写着四条底线。DSH 不能派分身时，个体会自己在当前对话里办。
+
+## 和其他插件一起用
+
+- **定义模型身份的注入要去掉。** 有些插件会注入「你是谁」之类的身份设定（例如 dsh-purge 的 `prompt-inject.md`），它会和角色的本性打架。本项目不改写、不屏蔽别的插件；用 `/chara show` 查看别的插件注入了哪些段，把其中定义身份的部分删掉。能力说明类的注入不受影响
+- **不建议同时使用全局记忆插件**（如 dsh-mnemon）。这类插件不分个体、不分会话，装着它，一个个体能查到你对另一个个体说过的话
+- 技能用 DSH 自带的技能系统，本项目不另建技能库
+
+## 数据存在哪
+
+| 系统 | 位置 |
+|---|---|
+| Windows | `%LOCALAPPDATA%\dsh-chara-soul` |
+| macOS | `~/Library/Application Support/dsh-chara-soul` |
+| Linux | `$XDG_DATA_HOME/dsh-chara-soul`，默认 `~/.local/share/dsh-chara-soul` |
+
+设置环境变量 `CHARA_SOUL_HOME` 可以换位置。数据和 DSH 的目录分开，重装 DSH 不受影响；要从零开始，退出 DSH 后删掉这个目录。
+
+每个个体一个目录（`beings/<个体id>/`），里面是角色卡 `card.yaml` 和这个个体的一生 `life.db`（SQLite）。离开 DSH 也能用命令行查看，在代码目录里执行：
+
+```bash
+npx chara list
+npx chara show
+```
+
+## 开发
+
+```bash
+npm test
+```
+
+纯 ESM JavaScript，没有构建步骤；测试用 `node:test`，在 Windows、macOS、Linux 上跑。
+
+发版：改根目录 `package.json` 的 `version`，提交后打同名标签（如 `v0.1.0`）并推送，CI 测试通过后自动打包上传到 GitHub Release。
 
 ## 参考
 
@@ -17,7 +165,7 @@
 | [icyaaaww/dsh-soul](https://github.com/icyaaaww/dsh-soul) | 图记忆、投影注入、supersedes、激活衰减、退役不删、受控演化、宿主能力探测 |
 | [gutuxxxxl/dsh-memory-blocks](https://github.com/gutuxxxxl/dsh-memory-blocks) | 陪伴场景三层记忆、人设保护、中文相对时间、记忆星图 |
 | [DeepSeek《Super-agent 设计探索》](https://zhuanlan.zhihu.com/p/2099987320443237060) | Router / Worker 双层、事件驱动与两级过滤、Inline & Spill、链式召回、状态外置、Watchdog |
-| 酒馆 Character Card V2/V3 | 角色卡导入导出格式 |
+| 酒馆 Character Card V2/V3 | 角色卡导入格式 |
 
 三个仓库均为 MIT 许可。本项目借思想、自写核心，不直接依赖。
 

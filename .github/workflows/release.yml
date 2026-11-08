@@ -1,0 +1,24 @@
+# 打 v* 标签时发版：测试通过后打包，作为 GitHub Release 的附件上传。
+# DSH 插件管理器从 releases/latest/download/dsh-chara-soul.tgz 安装。
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm test
+      - name: 标签必须与 package.json 的版本一致
+        run: test "${GITHUB_REF_NAME}" = "v$(node -p "require('./package.json').version")"
+      - run: npm pack && mv dsh-chara-soul-*.tgz dsh-chara-soul.tgz
+      - run: gh release create "$GITHUB_REF_NAME" dsh-chara-soul.tgz --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,4 +1,4 @@
-# DSH 在 dsh.profile.bundles 里列出本包时自动加载这一层。
+# DSH 在 dsh.profile.bundles 里列出 dsh-chara-soul 时自动加载这一层（路径登记在仓库根目录 package.json 的 dsh.bundle.patch）。
 # 不要把这段 insert 抄进 profile 的 cordis.patch.yml，否则 id 重复、设置无法保存。
 - insert:
     - id: chara-soul

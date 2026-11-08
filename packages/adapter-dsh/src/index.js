@@ -1,6 +1,7 @@
 // DSH 适配器：尽量薄，只把宿主事件接到核心（架构方案第十二节，接口依据 docs/decisions/001-dsh-接口.md）。
 // 只用命名导出：有 export default 时 DSH 加载器会丢掉 inject 与 Config。
-import { createCore } from 'chara-core';
+// 相对路径而不是包名：发布的安装包里核心与适配器同在一个包内，没有 chara-core 这个依赖
+import { createCore } from '../../core/src/index.js';
 
 // 宿主路由提供 @deepseek-ai/dsh-tools；本地测试时没有，退化为原样返回。
 const { defineTool } = await import('@deepseek-ai/dsh-tools').catch(() => ({ defineTool: (d) => d }));

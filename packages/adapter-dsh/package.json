@@ -1,26 +1,11 @@
 {
-  "name": "dsh-chara-soul",
+  "name": "chara-adapter-dsh",
   "version": "0.0.0",
   "license": "MIT",
   "private": true,
-  "description": "DSH 适配器：角色灵魂引擎",
+  "description": "DSH 适配器。发布时由仓库根目录的 dsh-chara-soul 包整体打包，这里只用于开发与测试",
   "type": "module",
-  "main": "src/index.js",
-  "exports": {
-    ".": "./src/index.js",
-    "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
-  },
   "engines": {
-    "node": ">=24",
-    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
-  },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
-  },
-  "dependencies": {
-    "chara-core": "0.0.0"
+    "node": ">=24"
   }
 }
