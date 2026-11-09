@@ -9,7 +9,7 @@
 
 1.0.0 是第一个发布版本，第一期的功能都在里面。从 GitHub 安装（装 `main` 分支最新代码）或从源码安装；没有发布到 npm。
 
-![大肥鱼人生架构](assets/architecture.jpg)
+![大肥鱼人生架构](https://raw.githubusercontent.com/Akashyc/dsh-chara-soul/refs/heads/main/assets/architecture.jpg)
 
 | 已经能用 |
 |---|
