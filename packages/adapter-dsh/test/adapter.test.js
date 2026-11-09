@@ -153,6 +153,12 @@ test('分身：chara_envoy 派出带底线的简报，结算时把任务与汇�
     const main = { id: 'session-1', header: { delegationDepth: 0 } };
     emit(main, 'user/message', userMsg('帮我修个 bug', 'r1'));
     const remember = tools.find((t) => t.name === 'chara_remember');
+    // 模型看到的必须是 JSON Schema，否则它不知道有哪些参数（简写原样交出去时 kind 从没被填过）
+    assert.deepEqual(remember.parameters.required, ['content']);
+    assert.equal(remember.parameters.type, 'object');
+    assert.deepEqual(Object.keys(remember.parameters.properties), ['content', 'kind', 'replaces', 'due', 'who']);
+    assert.equal(remember.parameters.properties.content.required, undefined);
+    assert.deepEqual(envoy.parameters.required, ['task']);
     assert.match(await remember.execute({ content: '幸运数字是 42' }, exec), /^已记住 #1/);
     assert.match(await remember.execute({ content: '幸运数字是 6', replaces: '#1' }, exec), /取代了 #1/);
     assert.match(await remember.execute({ content: 'x' }, { agent: { session: { id: 'c-0' } } }), /分身不记/);

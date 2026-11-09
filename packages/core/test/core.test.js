@@ -291,6 +291,13 @@ test('记忆点：自己记、改口取代、约定到期、窄规则、淡忘�
     assert.match(core.moment(), /#3 约定（咕哒大魔王丶 说的）：发工资后给你买白饭（11\/14 到期，还有 7 天）/);
     assert.match(core.remember({ content: 'y', due: '下周' }), /YYYY-MM-DD/);
 
+    // 模型把类型写进内容开头、或 kind 填中文名：摘下来当类型
+    const kindsOf = () => Object.fromEntries(core.view.memories(core.view.beings()[0].id).items.map((m) => [m.text, m.kind]));
+    core.remember({ content: '喜好：喜欢喝可乐' });
+    core.remember({ content: '喜欢猫薄荷', kind: '喜好' });
+    core.remember({ content: '体会：比例：3 比 1', kind: 'lesson' });
+    assert.deepEqual([kindsOf()['喜欢喝可乐'], kindsOf()['喜欢猫薄荷'], kindsOf()['比例：3 比 1']], ['preference', 'preference', 'lesson']);
+    assert.throws(() => core.remember({ content: '喜好：' }), /不能为空/);
     // 窄规则：用户本人说「记住……」就记；问句、群友的话、闲聊不记
     core.afterTurn({ session: 's', role: 'user', text: '记住，我下周三去体检' });
     core.afterTurn({ session: 's', role: 'user', text: '还记得我说过想睡觉吗？' });
@@ -299,6 +306,10 @@ test('记忆点：自己记、改口取代、约定到期、窄规则、淡忘�
     core.afterTurn({ session: 's', role: 'user', text: '记住，我下周三去体检' });
     const mems = core.view.memories(core.view.beings()[0].id).items;
     assert.deepEqual(mems.filter((m) => m.origin === 'rule').map((m) => m.text), ['我下周三去体检'], '只记一次，问句和群友的不记');
+    assert.match(core.moment(), /事实（用户的原话）：我下周三去体检/, '原话里的「我」标明是用户');
+    core.view.saveProfile({ name: 'Boss' });
+    assert.match(core.moment(), /事实（Boss的原话）：我下周三去体检/, '画像里有名字时用名字');
+    core.view.saveProfile({});
 
     // 淡忘：两个多月没想起就不进此刻，回想能找回并让它回到此刻
     tick(70 * 86_400_000);

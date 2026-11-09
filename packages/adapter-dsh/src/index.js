@@ -5,8 +5,16 @@ import { createCore } from '../../core/src/index.js';
 import { createUiHandler } from '../../ui/src/handler.js';
 import { randomBytes } from 'node:crypto';
 
-// 宿主路由提供 @deepseek-ai/dsh-tools；本地测试时没有，退化为原样返回。
-const { defineTool } = await import('@deepseek-ai/dsh-tools').catch(() => ({ defineTool: (d) => d }));
+// 参数用简写（{ 名: { type, required, description } }），模型要的是 JSON Schema。
+// @deepseek-ai/dsh-tools 的 defineTool 会转换，但从本插件的位置导入不到它（2026-11-09 实测：模型拿到的三个工具都没有参数），
+// 所以导入不到时自己转，不能原样交出去。
+/** 简写参数转成 JSON Schema。 */
+export function toSchema(params = {}) {
+  const properties = Object.fromEntries(Object.entries(params).map(([k, { required, ...rest }]) => [k, rest]));
+  const required = Object.keys(params).filter((k) => params[k].required);
+  return { type: 'object', properties, ...(required.length ? { required } : {}) };
+}
+const { defineTool } = await import('@deepseek-ai/dsh-tools').catch(() => ({ defineTool: (d) => ({ ...d, parameters: toSchema(d.parameters) }) }));
 
 export const name = 'chara-soul';
 export const inject = [];
@@ -227,7 +235,7 @@ export function apply(ctx, _config, deps = {}) {
           // content 放第一个：flash 模型偶尔把后面的参数吞进前一个字符串里，内容在最前面就不会丢（M10 实测）
           parameters: {
             content: { type: 'string', required: true, description: '要记的内容，一句话写清，200 字以内，如「用户的幸运数字是 6」' },
-            kind: { type: 'string', description: 'fact 事实 | preference 喜好 | promise 约定 | event 事件 | decision 决定 | feeling 感受 | rule 规矩 | lesson 体会；不填当事实' },
+            kind: { type: 'string', enum: ['fact', 'preference', 'promise', 'event', 'decision', 'feeling', 'rule', 'lesson'], description: '类型填在这里，不要写进 content。fact 事实 | preference 喜好 | promise 约定 | event 事件 | decision 决定 | feeling 感受 | rule 规矩（用户对你做事的要求） | lesson 体会；不填当事实' },
             replaces: { type: 'string', description: '改口时填被取代的旧记忆编号，如 12；不是改口就不填' },
             due: { type: 'string', description: '约定的到期日，YYYY-MM-DD；没有就不填' },
             who: { type: 'string', description: '说这话的人：用户本人不填；QQ 群里别人说的写对方昵称' },

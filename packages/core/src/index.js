@@ -9,7 +9,7 @@ import { readTavernJson, fromTavern } from './card/tavern.js';
 import { buildNature, buildBrief } from './nature/index.js';
 import { floor5, zone, timeLines, daysBetween, relative } from './chrono/index.js';
 import { openLife } from './memory/life.js';
-import { KINDS, vividness, memoryText, kindOf, explicitRemember, memoryLine, memoryLines, endOfDay } from './memory/points.js';
+import { KINDS, vividness, memoryText, kindOf, explicitRemember, memoryLine, memoryLines, endOfDay, splitKind } from './memory/points.js';
 
 const mtime = (f) => (existsSync(f) ? statSync(f).mtimeMs : 0);
 const CARD_FIELDS = ['name', 'appearance', 'personality', 'speech', 'relationship', 'first_mes', 'mes_example'];
@@ -38,6 +38,14 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     return kind;
   };
   const profileFile = () => path.join(home, 'profiles', `${roster.getState('profile') ?? 'default'}.yaml`);
+  /** 画像里用户的名字；没写或画像读不了时叫「用户」。 */
+  const userName = () => {
+    try {
+      return String(readYaml(profileFile())?.name ?? '').trim() || '用户';
+    } catch {
+      return '用户';
+    }
+  };
   const globalFile = () => path.join(home, 'global.md'); // 全局提示词，所有个体共用，不随画像切换
   const readGlobal = () => (existsSync(globalFile()) ? readFileSync(globalFile(), 'utf8') : '');
   const userAvatars = () => imageNames(profileFile().replace(/\.yaml$/, '.avatar')); // 用户头像跟画像放一起：profiles/<画像>.avatar.png
@@ -87,7 +95,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     if (wake && c.life.meta('born_at') == null) c.life.setMeta('born_at', t);
     const tz = zone(c.life.meta('tz'));
     const lines = timeLines({ now: t, born: c.life.meta('born_at'), prev: c.life.meta('prev_user_at'), last: c.life.meta('last_user_at'), tz });
-    const mem = memoryLines(c.life.memories(), t, tz);
+    const mem = memoryLines(c.life.memories(), t, tz, { user: userName() });
     if (mem.length) lines.push('', '记得的事（#编号是 chara_remember 取代旧记忆时用的；更早、淡了的用 chara_recall 找）：', ...mem);
     return lines.join('\n');
   }
@@ -118,7 +126,8 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   function remember({ content, kind, replaces, due, who, session = null } = {}) {
     const c = current();
     if (!c) return '还没有个体，没有记下。';
-    const text = memoryText(content);
+    const split = splitKind(memoryText(content), kind);
+    const text = memoryText(split.text);
     const hasOld = replaces != null && String(replaces).trim() !== '';
     const old = hasOld ? c.life.memory(Number(String(replaces).trim().replace(/^#/, ''))) : null;
     if (hasOld && (!old || old.replaced_by != null)) return `没有找到还有效的记忆 #${replaces}，没有记下。不是改口就不要填 replaces。`;
@@ -129,7 +138,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     }
     const dup = c.life.memories().find((m) => m.replaced_by == null && m.text === text);
     if (dup && !old) return `#${dup.id} 已经记着这件事了。`;
-    const id = c.life.addMemory({ kind: kindOf(kind), text, speaker: String(who ?? '').trim() || '用户', due: dueAt, origin: 'model', session, at: now() });
+    const id = c.life.addMemory({ kind: split.kind, text, speaker: String(who ?? '').trim() || '用户', due: dueAt, origin: 'model', session, at: now() });
     if (old) c.life.updateMemory(old.id, { replaced_by: id });
     return `已记住 #${id}${old ? `，取代了 #${old.id}` : ''}。`;
   }
@@ -152,7 +161,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     c.life.touchMemories(mems.map((m) => m.id), now());
     const cut = (t) => ([...t].length > 200 ? `${[...t].slice(0, 200).join('')}…` : t);
     const out = [];
-    if (mems.length) out.push('记得的：', ...mems.map((m) => `${memoryLine(m, now(), tz)}（${when.format(m.created)} 记下${m.replaced_by != null ? `，后来被 #${m.replaced_by} 取代` : ''}）`));
+    if (mems.length) out.push('记得的：', ...mems.map((m) => `${memoryLine(m, now(), tz, userName())}（${when.format(m.created)} 记下${m.replaced_by != null ? `，后来被 #${m.replaced_by} 取代` : ''}）`));
     if (rows.length) out.push(...(mems.length ? ['', '原话：'] : []), ...rows.map((r) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${cut(r.text.replace(/\s+/g, ' '))}`));
     return out.join('\n');
   }

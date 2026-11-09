@@ -18,7 +18,18 @@ export function memoryText(text) {
   return t;
 }
 
-export const kindOf = (k) => (Object.hasOwn(KINDS, k) ? k : 'fact');
+/** 类型代码；也认中文名（模型常填「喜好」而不是 preference）；认不出时当事实。 */
+export const kindOf = (k) => (Object.hasOwn(KINDS, k) ? k : (Object.keys(KINDS).find((c) => KINDS[c] === String(k ?? '').trim()) ?? 'fact'));
+
+/**
+ * 模型常把类型写进内容开头（「喜好：喜欢喝可乐」），kind 却不填：把开头的类型名摘下来当类型。
+ * @returns { kind, text }；kind 已给出有效类型时以它为准，开头的类型名照样摘掉
+ */
+export function splitKind(text, kind) {
+  const m = new RegExp(`^(${Object.values(KINDS).join('|')})\s*[：:]\s*`).exec(text);
+  const given = kind != null && String(kind).trim() !== '';
+  return m ? { kind: given ? kindOf(kind) : kindOf(m[1]), text: text.slice(m[0].length) } : { kind: kindOf(kind), text };
+}
 
 /** QQ 群里转进来的消息带「[昵称 (QQ号)]」前缀，那是群友在说话，不是用户本人。 */
 export const groupSpeaker = (text) => /^\[([^\]\n]+?) \([0-9A-F]{8,}\)\]/.exec(String(text))?.[1] ?? null;
@@ -50,9 +61,12 @@ export function endOfDay(ymd, tz) {
 
 const md = (t, tz) => new Intl.DateTimeFormat('zh-CN', { timeZone: tz, month: 'numeric', day: 'numeric' }).format(t);
 
-/** 一条记忆在此刻、回想里的写法：#编号 类型（谁说的）：内容（到期）。 */
-export function memoryLine(m, now, tz) {
-  const who = m.speaker && m.speaker !== '用户' ? `（${m.speaker} 说的）` : '';
+/**
+ * 一条记忆在此刻、回想里的写法：#编号 类型（谁说的）：内容（到期）。
+ * @param user 用户的名字（画像里的），窄规则记的是用户原话，里面的「我」指用户，不标出来个体会当成自己
+ */
+export function memoryLine(m, now, tz, user = '用户') {
+  const who = m.origin === 'rule' ? `（${user}的原话）` : m.speaker && m.speaker !== '用户' ? `（${m.speaker} 说的）` : '';
   let due = '';
   if (m.due != null) {
     const days = Math.floor((m.due - now) / DAY);
@@ -65,14 +79,14 @@ export function memoryLine(m, now, tz) {
  * 此刻里的「记得的事」：没被取代、还没淡忘的。常驻在前，其次是七天内到期或已到期的约定，再按鲜明度。
  * @returns 若干行；一条都没有时为空数组
  */
-export function memoryLines(all, now, tz, { max = 20, chars = 800 } = {}) {
+export function memoryLines(all, now, tz, { max = 20, chars = 800, user } = {}) {
   const urgent = (m) => m.kind === 'promise' && m.due != null && m.due - now < 7 * DAY;
   const rank = (m) => (m.pinned ? 3 : urgent(m) ? 2 : 0) + vividness(m, now);
   const live = all.filter((m) => m.replaced_by == null && (m.pinned || urgent(m) || vividness(m, now) >= FADED)).sort((a, b) => rank(b) - rank(a));
   const out = [];
   let used = 0;
   for (const m of live.slice(0, max)) {
-    const line = memoryLine(m, now, tz);
+    const line = memoryLine(m, now, tz, user);
     if (used + [...line].length > chars) break;
     out.push(line);
     used += [...line].length;
