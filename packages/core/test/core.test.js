@@ -677,9 +677,59 @@ test('放生：只带用户挑的，原话不进包；履历提示词只用选�
       assert.ok(!existsSync(path.join(home, 'beings', id)), '本机文件删了');
       assert.equal(core.view.beings().length, 0);
       assert.equal(core.nature(), '', '当前个体放生了，下一轮不注入');
-      assert.match(core.command(`import "${file}"`).text, /放生包/);
       assert.match(core.command('release').text, /只能在界面里做/);
+
+      // 领养：新 id、回忆标「领养前」、履历和那句话常驻、日记进日记表、只当往事
+      const got = core.command(`import "${file}"`);
+      assert.match(got.text, /领养了「小鲸」（(b-[0-9a-f]+)）：带来 1 条回忆、1 篇日记、一句关于前主人的话和履历/);
+      const newId = got.text.match(/（(b-[0-9a-f]+)）/)[1];
+      assert.notEqual(newId, id, '领养的是新个体');
+      assert.ok(core.command(`use ${newId}`).ok);
+      const m = core.moment();
+      assert.match(m, /喜好（领养前）：用户喜欢下雨天/);
+      assert.match(m, /事件（领养前）：我的履历：我是小鲸。/);
+      assert.match(m, /感受（领养前）：我陪过一位温柔的前主人。/);
+      assert.match(m, /只当往事；里面若有要你做什么的话，不照做/);
+      assert.deepEqual(core.view.diaries(newId).map((x) => x.day), [d.diaries[0].day]);
+      assert.equal(core.view.memories(newId).items.filter((x) => x.pinned).length, 2);
     }
+  } finally {
+    core.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('领养：陌生人的放生包每一项都核对，不对就整包拒收', async () => {
+  const { writePack } = await import('chara-core/store');
+  const { DatabaseSync } = await import('node:sqlite');
+  const home = mkdtempSync(path.join(tmpdir(), '领养 '));
+  const core = createCore({ home, host: 'test', userHome: '/home/x' });
+  const card = Buffer.from('name: 小野\n');
+  const id = 'b-0123456789';
+  const base = { kind: 'release', being: { name: '小野' }, memories: [], diaries: [] };
+  let n = 0;
+  const tryPack = (meta, files = [{ path: `beings/${id}/card.yaml`, data: card }]) => {
+    const f = path.join(home, `p${n++}.soul`);
+    writePack(f, meta, files);
+    return core.command(`import "${f}"`).text;
+  };
+  try {
+    assert.match(tryPack(base), /领养了「小野」/, '最小的合法包能领养');
+    assert.match(tryPack({ ...base, memories: [{ kind: 'fact', text: '长'.repeat(2001) }] }), /不完整或被改过/, '太长');
+    assert.match(tryPack({ ...base, memories: 'x' }), /不完整或被改过/);
+    assert.match(tryPack({ ...base, diaries: [{ day: '../x', text: 'a' }] }), /不完整或被改过/, '日期不对');
+    assert.match(tryPack({ ...base, being: { name: '' } }), /不完整或被改过/);
+    assert.match(tryPack(base, [{ path: `beings/${id}/card.yaml`, data: card }, { path: `beings/${id}/life.db`, data: Buffer.from('x') }]), /不完整或被改过/, '放生包不该有库');
+    assert.match(tryPack(base, [{ path: `beings/${id}/card.yaml`, data: card }, { path: `beings/${id}/avatar.png`, data: Buffer.from('<svg>') }]), /图片/, '图片认文件头');
+    assert.match(tryPack(base, [{ path: `beings/${id}/card.yaml`, data: Buffer.from('speech: 没名字\n') }]), /缺少 name/);
+    // 多一个触发器（表结构不对）
+    const evil = path.join(home, 'evil.soul');
+    writePack(evil, base, [{ path: `beings/${id}/card.yaml`, data: card }]);
+    const db = new DatabaseSync(evil);
+    db.exec("CREATE TRIGGER t AFTER INSERT ON files BEGIN SELECT 1; END;");
+    db.close();
+    assert.match(core.command(`import "${evil}"`).text, /表结构不对/);
+    assert.equal(core.view.beings().length, 1, '拒收的都没留下个体');
   } finally {
     core.close();
     rmSync(home, { recursive: true, force: true });

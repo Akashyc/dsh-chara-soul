@@ -66,7 +66,7 @@ const md = (t, tz) => new Intl.DateTimeFormat('zh-CN', { timeZone: tz, month: 'n
  * @param user 用户的名字（画像里的），窄规则记的是用户原话，里面的「我」指用户，不标出来个体会当成自己
  */
 export function memoryLine(m, now, tz, user = '用户') {
-  const who = m.origin === 'rule' ? `（${user}的原话）` : m.speaker && m.speaker !== '用户' ? `（${m.speaker} 说的）` : '';
+  const who = m.origin === 'adopted' ? '（领养前）' : m.origin === 'rule' ? `（${user}的原话）` : m.speaker && m.speaker !== '用户' ? `（${m.speaker} 说的）` : '';
   let due = '';
   if (m.due != null) {
     const days = Math.floor((m.due - now) / DAY);

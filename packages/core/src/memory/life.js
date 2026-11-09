@@ -2,6 +2,29 @@
 import path from 'node:path';
 import { openDb, migrate, ftsIndex, search } from '../store/index.js';
 
+/** 记忆点的来源是 CHECK 约束，SQLite 改不了，只能重建表；id 不变，全文索引照旧对得上。 */
+function memoryOrigins(origins) {
+  return (s) => {
+    s.db.exec(`ALTER TABLE memories RENAME TO memories_old;
+      CREATE TABLE memories (
+        id INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL,
+        text TEXT NOT NULL,
+        speaker TEXT NOT NULL DEFAULT '用户',
+        due INTEGER,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        origin TEXT NOT NULL CHECK (origin IN (${origins.map((o) => `'${o}'`).join(', ')})),
+        session TEXT,
+        created INTEGER NOT NULL,
+        touched INTEGER NOT NULL,
+        replaced_by INTEGER
+      );
+      INSERT INTO memories SELECT * FROM memories_old;
+      DROP TABLE memories_old;`);
+    ftsIndex(s, 'memories', ['text']);
+  };
+}
+
 const STEPS = [
   `CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
    CREATE TABLE turns (
@@ -45,26 +68,10 @@ const STEPS = [
      text TEXT NOT NULL,
      created INTEGER NOT NULL
    );`,
-  // 来源加 card（世界书条目导入成初始记忆点，验收 2）：SQLite 改不了 CHECK，只能重建表；id 不变，全文索引照旧对得上
-  (s) => {
-    s.db.exec(`ALTER TABLE memories RENAME TO memories_old;
-      CREATE TABLE memories (
-        id INTEGER PRIMARY KEY,
-        kind TEXT NOT NULL,
-        text TEXT NOT NULL,
-        speaker TEXT NOT NULL DEFAULT '用户',
-        due INTEGER,
-        pinned INTEGER NOT NULL DEFAULT 0,
-        origin TEXT NOT NULL CHECK (origin IN ('model', 'rule', 'user', 'card')),
-        session TEXT,
-        created INTEGER NOT NULL,
-        touched INTEGER NOT NULL,
-        replaced_by INTEGER
-      );
-      INSERT INTO memories SELECT * FROM memories_old;
-      DROP TABLE memories_old;`);
-    ftsIndex(s, 'memories', ['text']);
-  },
+  // 来源加 card（世界书条目导入成初始记忆点，验收 2）
+  memoryOrigins(['model', 'rule', 'user', 'card']),
+  // 来源加 adopted（领养来的放生包里带的回忆，M9）
+  memoryOrigins(['model', 'rule', 'user', 'card', 'adopted']),
 ];
 
 const MEMORY_FIELDS = ['kind', 'text', 'speaker', 'due', 'pinned', 'replaced_by'];

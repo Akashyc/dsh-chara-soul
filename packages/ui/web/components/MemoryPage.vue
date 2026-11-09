@@ -7,7 +7,7 @@ import Select from './Select.vue';
 import DiaryList from './DiaryList.vue';
 
 const mode = ref('points'); // points 记忆点 | diary 日记
-const ORIGIN = { model: '它自己记的', rule: '你说「记住」时记的', user: '你手动加的', card: '来自角色卡' };
+const ORIGIN = { model: '它自己记的', rule: '你说「记住」时记的', user: '你手动加的', card: '来自角色卡', adopted: '领养前带来的' };
 
 const viewing = ref(current.value?.id ?? state.beings[0]?.id ?? null);
 const beingOptions = computed(() => state.beings.map((b) => ({ value: b.id, label: b.name, being: b })));
