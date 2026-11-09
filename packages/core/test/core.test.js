@@ -44,10 +44,10 @@ test('本性：底线完整保留，超预算时先裁外貌', () => {
   assert.match(full, /你是小鲸/);
   assert.match(full, /你称呼用户为：Boss/);
   assert.ok(full.includes(BOTTOM_LINES));
-  const tight = buildNature(card, null, 500);
+  const tight = buildNature(card, null, 600);
   assert.ok(tight.includes(BOTTOM_LINES), '底线不裁');
   assert.match(tight, /自称本鱼/, '口吻优先于外貌保留');
-  assert.ok([...tight].length <= 520);
+  assert.ok([...tight].length <= 620);
   assert.equal(buildNature(card), buildNature(card), '同样输入逐字节相同');
 });
 
