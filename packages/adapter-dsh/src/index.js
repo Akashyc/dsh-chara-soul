@@ -276,10 +276,13 @@ export function apply(ctx, _config, deps = {}) {
       c.tools.register(
         defineTool({
           name: 'chara_recall',
-          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你记下的事和你们的原话。用户问起你的日记时，关键词写「日记」给最近一篇，写日期（YYYY-MM-DD）给那天的；日记在这里，不在文件里。',
-          parameters: { query: { type: 'string', required: true, description: '关键词，越具体越好，如「猫的名字」写成「猫」' } },
+          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你记下的事和你们的原话。用户问起你的日记时，关键词写「日记」给最近一篇，写日期（YYYY-MM-DD）给那天的；日记在这里，不在文件里。结果里带 [m3] [t12] [e…] 编号的可以填 open 继续展开：记忆点 → 当时的原话 → 当时派出的分身 → 分身的汇报。',
+          parameters: {
+            query: { type: 'string', description: '关键词，越具体越好，如「猫的名字」写成「猫」；填了 open 就不用填' },
+            open: { type: 'string', description: '要展开的编号，如 m3、t12、e 开头的分身编号；不展开就不填' },
+          },
           output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
-          execute: async (args) => core.recall(args.query),
+          execute: async (args) => (String(args.open ?? '').trim() ? core.expand(args.open) : core.recall(args.query)),
         }),
       ),
     );
@@ -295,7 +298,7 @@ export function apply(ctx, _config, deps = {}) {
           // content 放第一个：flash 模型偶尔把后面的参数吞进前一个字符串里，内容在最前面就不会丢（M10 实测）
           parameters: {
             content: { type: 'string', required: true, description: '要记的内容，一句话写清，200 字以内，如「用户的幸运数字是 6」' },
-            kind: { type: 'string', enum: ['fact', 'preference', 'promise', 'event', 'decision', 'feeling', 'rule', 'lesson'], description: '类型填在这里，不要写进 content。fact 事实 | preference 喜好 | promise 约定 | event 事件 | decision 决定 | feeling 感受 | rule 规矩（用户对你做事的要求） | lesson 体会；不填当事实' },
+            kind: { type: 'string', enum: ['fact', 'preference', 'promise', 'event', 'decision', 'feeling', 'rule', 'lesson', 'pending'], description: '类型填在这里，不要写进 content。fact 事实 | preference 喜好 | promise 约定 | event 事件 | decision 决定 | feeling 感受 | rule 规矩（用户对你做事的要求） | lesson 体会 | pending 待续（没办完的事、没聊完的话题，办完了用 replaces 记一条事件取代它）；不填当事实' },
             replaces: { type: 'string', description: '改口时填被取代的旧记忆编号，如 12；不是改口就不填' },
             due: { type: 'string', description: '约定的到期日，YYYY-MM-DD；没有就不填' },
             who: { type: 'string', description: '说这话的人：用户本人不填；QQ 群里别人说的写对方昵称' },

@@ -72,7 +72,14 @@ const STEPS = [
   memoryOrigins(['model', 'rule', 'user', 'card']),
   // 来源加 adopted（领养来的放生包里带的回忆，M9）
   memoryOrigins(['model', 'rule', 'user', 'card', 'adopted']),
+  // 角色卡的旧版本（重塑可回滚）：发现 card.yaml 变了，就把上一版存进来
+  `CREATE TABLE card_versions (
+     id INTEGER PRIMARY KEY,
+     text TEXT NOT NULL,
+     at INTEGER NOT NULL
+   );`,
 ];
+const KEEP_VERSIONS = 20;
 
 const MEMORY_FIELDS = ['kind', 'text', 'speaker', 'due', 'pinned', 'replaced_by'];
 
@@ -125,6 +132,22 @@ export function openLife(dir) {
     /** 同一天重写时覆盖。 */
     saveDiary: (day, text, at) => db.prepare('INSERT INTO diaries (day, text, created) VALUES (?, ?, ?) ON CONFLICT(day) DO UPDATE SET text = excluded.text, created = excluded.created').run(day, text, at),
     deleteDiary: (day) => db.prepare('DELETE FROM diaries WHERE day = ?').run(day),
+    /** 存一份旧版角色卡，只留最近 KEEP_VERSIONS 份。 */
+    addCardVersion(text, at) {
+      db.prepare('INSERT INTO card_versions (text, at) VALUES (?, ?)').run(text, at);
+      db.prepare('DELETE FROM card_versions WHERE id NOT IN (SELECT id FROM card_versions ORDER BY id DESC LIMIT ?)').run(KEEP_VERSIONS);
+    },
+    cardVersions: () => db.prepare('SELECT * FROM card_versions ORDER BY id DESC').all(),
+    cardVersion: (vid) => db.prepare('SELECT * FROM card_versions WHERE id = ?').get(vid) ?? null,
+    envoy: (id) => db.prepare('SELECT * FROM envoys WHERE id = ?').get(id) ?? null,
+    /** 某会话 [from, to] 之间派出的分身。 */
+    envoysBetween: (session, from, to) => db.prepare('SELECT * FROM envoys WHERE session = ? AND at >= ? AND at <= ? ORDER BY at').all(session, from, to),
+    /** 某会话里某时刻前后各 n 条原话。 */
+    turnsAround: (session, at, n = 3) => [
+      ...db.prepare('SELECT * FROM turns WHERE session = ? AND at <= ? ORDER BY at DESC, id DESC LIMIT ?').all(session, at, n).reverse(),
+      ...db.prepare('SELECT * FROM turns WHERE session = ? AND at > ? ORDER BY at, id LIMIT ?').all(session, at, n),
+    ],
+    turn: (id) => db.prepare('SELECT * FROM turns WHERE id = ?').get(id) ?? null,
     close: () => db.close(),
   };
 }

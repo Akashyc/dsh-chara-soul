@@ -54,6 +54,19 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal((await call('GET', '/api/state')).data.beings[0].name, '大鲸', '改名同步到名册');
     assert.equal((await call('PUT', `/api/card?id=${b.id}`, { name: '' })).status, 400, '保存前校验');
     assert.equal((await call('GET', '/api/card?id=b-nope')).status, 400);
+    const [v] = (await call('GET', `/api/card-versions?id=${b.id}`)).data;
+    assert.equal(v.name, '小鲸');
+    assert.equal((await call('POST', `/api/card-versions?id=${b.id}&vid=${v.id}`)).status, 200);
+    assert.equal((await call('GET', '/api/state')).data.beings[0].name, '小鲸', '回滚');
+    const [undo] = (await call('GET', `/api/card-versions?id=${b.id}`)).data;
+    await call('POST', `/api/card-versions?id=${b.id}&vid=${undo.id}`); // 回滚也能撤回
+    assert.equal((await call('GET', '/api/state')).data.beings[0].name, '大鲸');
+    const { id: pid } = (await call('POST', '/api/profiles')).data;
+    assert.equal((await call('GET', '/api/profiles')).data.current, pid);
+    assert.equal((await call('DELETE', `/api/profiles?pid=${pid}`)).status, 400, '正在用的不能删');
+    assert.equal((await call('PUT', '/api/profiles?pid=nope')).status, 400);
+    assert.equal((await call('PUT', '/api/profiles?pid=default')).status, 200);
+    assert.equal((await call('DELETE', `/api/profiles?pid=${pid}`)).status, 200);
 
     assert.equal(b.avatar, 0);
     assert.equal((await call('PUT', `/api/avatar?id=${b.id}`, 'not an image')).status, 400, '只收图片');

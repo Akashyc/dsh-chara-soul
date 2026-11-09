@@ -171,7 +171,7 @@ test('迁移第 6 步：记忆点表重建后旧记忆还在、能搜到，来�
     openLife(dir).close();
     // 退回第 5 步时的表：来源不认 card
     const db = new DatabaseSync(path.join(dir, 'life.db'));
-    db.exec(`DROP TABLE memories;
+    db.exec(`DROP TABLE memories; DROP TABLE card_versions;
       CREATE TABLE memories (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, text TEXT NOT NULL, speaker TEXT NOT NULL DEFAULT '用户', due INTEGER, pinned INTEGER NOT NULL DEFAULT 0,
         origin TEXT NOT NULL CHECK (origin IN ('model', 'rule', 'user')), session TEXT, created INTEGER NOT NULL, touched INTEGER NOT NULL, replaced_by INTEGER);
       INSERT INTO memories (kind, text, origin, created, touched) VALUES ('fact', '用户养了一只橘猫', 'model', 1, 1);
@@ -295,7 +295,7 @@ test('回想：按关键词翻当前个体的原话，个体之间不相通', ()
     tick(MIN);
     core.afterTurn({ session: 's', role: 'assistant', text: '团子这个名字真可爱' });
     core.afterTurn({ session: 's', role: 'user', text: '今天下雨了' });
-    assert.match(core.recall('团子'), /2026\/11\/7 23:58 用户：我家的猫叫团子\n.*你：团子这个名字真可爱/, '两个字走逐行匹配，按时间排');
+    assert.match(core.recall('团子'), /2026\/11\/7 23:58 用户：我家的猫叫团子 \[t1\]\n.*你：团子这个名字真可爱/, '两个字走逐行匹配，按时间排');
     assert.match(core.recall('猫叫团'), /我家的猫叫团子/, '三个字走全文索引');
     assert.match(core.recall('狗'), /没有找到/);
     assert.match(core.command('reminisce 下雨').text, /今天下雨了/);
@@ -735,3 +735,89 @@ test('领养：陌生人的放生包每一项都核对，不对就整包拒收',
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('重塑：每次改卡存上一版，最多 20 份；回滚把当前版也存进历史；手改文件也算', () =>
+  withHome(({ core, tick }) => {
+    const file = core.command('new 小鲸').text.match(/角色卡在 (.+card\.yaml)/)[1];
+    const id = core.view.beings()[0].id;
+    core.nature();
+    assert.match(core.command('history').text, /还没改过/);
+    core.view.saveCard(id, { name: '小鲸', speech: '自称本鱼' });
+    tick(MIN);
+    core.view.saveCard(id, { name: '大鲸', speech: '自称本鲸' });
+    const list = core.view.cardVersions(id);
+    assert.deepEqual(list.map((v) => v.name), ['小鲸', '小鲸']);
+    assert.match(core.command('history 大鲸').text, /换下的「小鲸」/);
+
+    core.view.restoreCard(id, list[0].id);
+    assert.match(core.nature(), /自称本鱼/);
+    assert.equal(core.view.beings()[0].name, '小鲸', '回滚后名册跟着改名');
+    assert.equal(core.view.cardVersions(id)[0].name, '大鲸', '回滚前的版本也留着');
+    assert.throws(() => core.view.restoreCard(id, 999), /没有这个版本/);
+
+    writeFileSync(file, readFileSync(file, 'utf8').replace('自称本鱼', '自称阿鲸'));
+    utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+    core.nature();
+    assert.equal(core.view.cardVersions(id).length, 4, '手改文件也存上一版');
+    for (let i = 0; i < 25; i++) core.view.saveCard(id, { name: '小鲸', speech: `第 ${i} 版` });
+    assert.equal(core.view.cardVersions(id).length, 20);
+  }));
+
+test('待续：不带日期，一直留在此刻直到被取代；类型名后带空格也能摘下', () =>
+  withHome(({ core, tick }) => {
+    core.command('new 甲');
+    core.afterTurn({ session: 's', role: 'user', text: '你好', tz: 'Asia/Shanghai' });
+    assert.match(core.remember({ content: '待续 ：帮用户挑的相机还没定', session: 's' }), /已记住 #1/);
+    core.remember({ content: '用户住在杭州', session: 's' });
+    tick(200 * DAY);
+    const m = core.moment();
+    assert.match(m, /#1 待续：帮用户挑的相机还没定/);
+    assert.doesNotMatch(m, /杭州/, '普通记忆照样淡忘');
+    core.remember({ content: '帮用户定了相机', kind: 'event', replaces: '1' });
+    assert.doesNotMatch(core.moment(), /相机还没定/);
+  }));
+
+test('逐层回想：记忆 → 当时的原话 → 当时派出的分身 → 汇报', () =>
+  withHome(({ core, tick }) => {
+    assert.match(core.expand('m1'), /还没有个体/);
+    core.command('new 甲');
+    core.afterTurn({ session: 's', role: 'user', text: '帮我整理桌面上的照片', tz: 'Asia/Shanghai' });
+    tick(MIN);
+    core.envoyReport({ id: 'sub1', session: 's', task: '整理桌面照片', report: '按月份分了 12 个文件夹' });
+    core.afterTurn({ session: 's', role: 'assistant', text: '整理好了，按月份分的' });
+    core.remember({ content: '帮用户按月份整理了照片', kind: 'event', session: 's' });
+    core.view.addMemory(core.view.beings()[0].id, { text: '用户养了猫' });
+
+    assert.match(core.recall('照片'), /\[t1\][\s\S]*用 open 填/);
+    const m1 = core.expand('m1');
+    assert.match(m1, /记忆 #1：帮用户按月份整理了照片/);
+    assert.match(m1, /用户：帮我整理桌面上的照片 \[t1\]/);
+    assert.match(m1, /去办「整理桌面照片」 \[esub1\]/);
+    assert.equal(core.expand('#1'), m1, '#3 也认');
+    assert.match(core.expand('t1'), /你：整理好了/);
+    assert.match(core.expand('esub1'), /汇报：\n按月份分了 12 个文件夹/);
+    assert.match(core.expand('m2'), /用户在界面里加的.*没有当时的原话/);
+    assert.match(core.expand('m9'), /没有记忆 #9/);
+    assert.match(core.expand('x'), /认不出/);
+  }));
+
+test('多份画像：新建复制当前的并切换过去，切换后本性跟着变；正在用的不能删；迁移包带上全部画像', () =>
+  withHome(({ core }) => {
+    core.command('new 甲');
+    core.view.saveProfile({ name: '阿宇' });
+    assert.match(core.nature(), /阿宇/);
+    const { id } = core.view.newProfile();
+    assert.equal(core.view.profiles().current, id);
+    assert.equal(core.view.profile().name, '阿宇', '复制当前画像');
+    core.view.saveProfile({ name: '小宇' });
+    assert.match(core.nature(), /小宇/);
+    core.view.useProfile('default');
+    assert.match(core.nature(), /阿宇/);
+    assert.deepEqual(core.view.profiles().list.map((p) => p.name).sort(), ['小宇', '阿宇']);
+    assert.throws(() => core.view.deleteProfile('default'), /正在用/);
+    assert.throws(() => core.view.useProfile('../x'), /没有这份画像/);
+    const r = core.command('migrate 画像');
+    assert.ok(r.ok, r.text);
+    core.view.deleteProfile(id);
+    assert.equal(core.view.profiles().list.length, 1);
+  }));

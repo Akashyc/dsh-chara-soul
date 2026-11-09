@@ -69,6 +69,8 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
       }
       if (is('GET', '/api/card')) return send(200, core.view.card(q('id')));
       if (is('GET', '/api/profile')) return send(200, core.view.profile());
+      if (is('GET', '/api/profiles')) return send(200, core.view.profiles());
+      if (is('GET', '/api/card-versions')) return send(200, core.view.cardVersions(q('id')));
       if (is('GET', '/api/global')) return send(200, core.view.global());
       if (is('GET', '/api/memories')) return send(200, core.view.memories(q('id')));
       if (is('GET', '/api/diaries')) return send(200, core.view.diaries(q('id')));
@@ -81,6 +83,10 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
       if (is('PUT', '/api/user-avatar')) return core.view.saveUserAvatar(await readBody(req)), send(200, { ok: true });
       if (image && req.method === 'PUT') return core.view.saveImage(q('id'), image, await readBody(req)), send(200, { ok: true });
       if (is('PUT', '/api/profile')) return core.view.saveProfile(await json()), onChange(), send(200, { ok: true });
+      if (is('POST', '/api/card-versions')) return core.view.restoreCard(q('id'), q('vid')), onChange(), send(200, { ok: true });
+      if (is('POST', '/api/profiles')) return send(200, core.view.newProfile()), onChange();
+      if (is('PUT', '/api/profiles')) return core.view.useProfile(q('pid')), onChange(), send(200, { ok: true });
+      if (is('DELETE', '/api/profiles')) return core.view.deleteProfile(q('pid')), send(200, { ok: true });
       if (is('PUT', '/api/global')) return core.view.saveGlobal(await json()), onChange(), send(200, { ok: true });
       if (is('POST', '/api/memories')) return send(200, core.view.addMemory(q('id'), await json()));
       if (is('PUT', '/api/memories')) return core.view.saveMemory(q('id'), q('mid'), await json()), send(200, { ok: true });

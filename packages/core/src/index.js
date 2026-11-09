@@ -43,7 +43,12 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     if (!IMAGE_KINDS.includes(kind)) throw new Error(`没有这种图片：${kind}`);
     return kind;
   };
-  const profileFile = () => path.join(home, 'profiles', `${roster.getState('profile') ?? 'default'}.yaml`);
+  const currentProfile = () => roster.getState('profile') ?? 'default';
+  const profileFile = () => path.join(home, 'profiles', `${currentProfile()}.yaml`);
+  const profileIds = () => {
+    const dir = path.join(home, 'profiles');
+    return existsSync(dir) ? readdirSync(dir).filter((f) => /^[\w-]+\.yaml$/.test(f)).map((f) => f.slice(0, -5)) : [];
+  };
   /** 画像里用户的名字；没写或画像读不了时叫「用户」。 */
   const userName = () => {
     try {
@@ -86,12 +91,25 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
         if (card.name !== roster.get(id).name) roster.rename(id, card.name);
         b.nature = buildNature(card, readYaml(profileFile()), 2000, readGlobal());
         b.error = null;
+        // 重塑可回滚：卡（界面里改或手改文件）读得通且和上回不同，就把上一版存进历史
+        const text = readFileSync(cardFile(id), 'utf8');
+        const last = b.life.meta('card_text');
+        if (text !== last) {
+          if (last != null) b.life.addCardVersion(last, now());
+          b.life.setMeta('card_text', text);
+        }
       } catch (e) {
         b.error = e.message;
       }
     }
     return b;
   }
+
+  // 界面刚写过卡：不等 mtime（精度有限）变化，强制重读一次
+  const refresh = (id) => {
+    if (open.has(id)) open.get(id).stamp = '';
+    return being(id);
+  };
 
   const current = () => {
     const row = roster.current();
@@ -188,11 +206,47 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     const rows = c.life.searchTurns(q);
     if (!mems.length && !rows.length) return [...diaryOut, `记忆和原话里都没有找到「${q}」。`].join('\n\n');
     c.life.touchMemories(mems.map((m) => m.id), now());
-    const cut = (t) => ([...t].length > 200 ? `${[...t].slice(0, 200).join('')}…` : t);
     const out = diaryOut.length ? [...diaryOut, ''] : [];
     if (mems.length) out.push('记得的：', ...mems.map((m) => `${memoryLine(m, now(), tz, userName())}（${when.format(m.created)} 记下${m.replaced_by != null ? `，后来被 #${m.replaced_by} 取代` : ''}）`));
-    if (rows.length) out.push(...(mems.length ? ['', '原话：'] : []), ...rows.map((r) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${cut(r.text.replace(/\s+/g, ' '))}`));
+    if (rows.length) out.push(...(mems.length ? ['', '原话：'] : []), ...rows.map((r) => turnLine(r, when)));
+    out.push('', '要看某条当时前后的原话和派出的分身，用 open 填它的编号（记忆写 m 加编号，如 m3；原话写 t12）。');
     return out.join('\n');
+  }
+
+  const cut = (t, n = 200) => ([...t].length > n ? `${[...t].slice(0, n).join('')}…` : t);
+  const turnLine = (r, when) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${cut(r.text.replace(/\s+/g, ' '))} [t${r.id}]`;
+  const NEAR = 30 * 60_000; // 原话前后半小时内派出的分身算「当时派出的」
+
+  /**
+   * 逐层回想（架构方案 11.7）：没有关联表，按会话和时间推出下一层。
+   * m<编号>：记下时前后的原话 → t<编号>：前后的原话和当时派出的分身 → e<分身编号>：分身的任务和汇报。
+   */
+  function expand(ref) {
+    const c = current();
+    if (!c) return '还没有个体，没有可回想的。';
+    const r = String(ref ?? '').trim().replace(/^#/, 'm');
+    const when = new Intl.DateTimeFormat('zh-CN', { timeZone: zone(c.life.meta('tz')), year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    const around = (session, at) => {
+      const turns = c.life.turnsAround(session, at);
+      const envoys = c.life.envoysBetween(session, at - NEAR, at + NEAR);
+      return [...(turns.length ? ['当时前后的原话：', ...turns.map((t) => turnLine(t, when))] : ['当时前后没有原话。']), ...(envoys.length ? ['', '当时派出的分身：', ...envoys.map((e) => `${when.format(e.at)} 去办「${cut(e.task, 80)}」 [e${e.id}]`)] : [])];
+    };
+    let m = /^m(\d+)$/.exec(r);
+    if (m) {
+      const mem = c.life.memory(Number(m[1]));
+      if (!mem) return `没有记忆 #${m[1]}。`;
+      const head = `记忆 #${mem.id}：${mem.text}（${when.format(mem.created)} 记下）`;
+      return mem.session ? [head, '', ...around(mem.session, mem.created)].join('\n') : `${head}\n这条不是聊天时记下的（${{ user: '用户在界面里加的', card: '来自角色卡', adopted: '领养前带来的' }[mem.origin] ?? '没有会话'}），没有当时的原话。`;
+    }
+    if ((m = /^t(\d+)$/.exec(r))) {
+      const t = c.life.turn(Number(m[1]));
+      return t ? around(t.session, t.at).join('\n') : `没有原话 t${m[1]}。`;
+    }
+    if ((m = /^e(.+)$/.exec(r))) {
+      const e = c.life.envoy(m[1]);
+      return e ? `分身 ${when.format(e.at)} 去办「${e.task}」，汇报：\n${cut(e.report, 2000)}` : `没有分身 ${m[1]}。`;
+    }
+    return `认不出编号「${ref}」：记忆写 m3，原话写 t12，分身写 e 加它的编号。`;
   }
 
   /**
@@ -279,9 +333,9 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     return path.join(path.resolve(dir), `${label.replace(/[\\/:*?"<>|\s]/g, '_')}-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.soul`);
   }
 
-  /** 用户画像进包的文件：当前画像、用户头像、全局提示词。 */
+  /** 用户画像进包的文件：全部画像和各自的头像、全局提示词。 */
   const profileFiles = () =>
-    [profileFile(), ...userAvatars(), globalFile()]
+    [...profileIds().flatMap((p) => [path.join(home, 'profiles', `${p}.yaml`), ...imageNames(path.join(home, 'profiles', `${p}.avatar`))]), globalFile()]
       .map((f) => ({ path: path.relative(home, f).split(path.sep).join('/'), data: readIf(f) }))
       .filter((f) => f.data);
 
@@ -602,6 +656,14 @@ ${material}`;
       if (!c) return ok('还没有个体，本轮不注入任何内容。');
       return ok([`【本性】\n${c.nature}`, `【此刻】\n${moment(false)}`, c.error ? `⚠ 角色卡读取出错，仍在用上一版：${c.error}` : ''].filter(Boolean).join('\n\n'));
     },
+    /** 角色卡的历史版本；回滚在界面角色卡页做。 */
+    history(key) {
+      const row = key ? roster.find(key, (r) => alive(r.id)) : current()?.row;
+      if (!row) return fail(key ? `没有叫「${key}」的个体。` : '还没有个体。');
+      const list = view.cardVersions(row.id);
+      if (!list.length) return ok(`「${row.name}」的角色卡还没改过，没有历史版本。`);
+      return ok([`「${row.name}」角色卡的历史版本（最多留 20 份），回滚在界面的角色卡页：`, ...list.map((v) => `${relative(now() - v.at).replace(/^(?!刚刚)(.+)$/, "$1前")}换下的「${v.name}」`)].join('\n'));
+    },
     reminisce: (q) => ok(recall(q)),
     dream: () => fail('入梦要调用模型写日记，只能在 DSH 里用 /chara dream。'),
     profile() {
@@ -609,7 +671,7 @@ ${material}`;
       if (!existsSync(f)) writeText(f, profileTemplate());
       return ok(`用户画像在 ${f}，编辑保存后下一轮生效。`);
     },
-    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> [目录] | release | show | reminisce <关键词> | dream [日期] | profile'),
+    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> [目录] | release | show | history [名字] | reminisce <关键词> | dream [日期] | profile'),
   };
 
   /** 用户命令。raw 是子命令及参数的原文，如 "use 蒂普茜柯"。 */
@@ -674,6 +736,26 @@ ${material}`;
       const card = validateCard({ ...readCard(cardFile(known(id))), ...pick(fields, CARD_FIELDS) });
       writeText(cardFile(id), cardText(card));
       if (card.name !== roster.get(id).name) roster.rename(id, card.name);
+      refresh(id); // 马上把上一版存进历史
+    },
+    /** 角色卡的历史版本，新的在前；at 是这一版被换下的时刻。 */
+    cardVersions(id) {
+      return being(known(id)).life.cardVersions().map((v) => {
+        let name = '';
+        try {
+          name = String(YAML.parse(v.text)?.name ?? '');
+        } catch {}
+        return { id: v.id, at: v.at, name };
+      });
+    },
+    /** 回滚到某个历史版本；当前这一版先存进历史，所以回滚也能撤回。 */
+    restoreCard(id, vid) {
+      const b = being(known(id));
+      const v = b.life.cardVersion(Number(vid));
+      if (!v) throw new Error(`没有这个版本：${vid}`);
+      validateCard(YAML.parse(v.text));
+      writeText(cardFile(id), v.text);
+      refresh(id);
     },
     /** 未保存的表单拼出来的本性，以及哪些字段被预算截掉。 */
     preview(fields) {
@@ -685,6 +767,39 @@ ${material}`;
       return { nature: text, length: [...text].length - (g ? [...g].length + 9 : 0), budget: 2000, cut };
     },
     profile: () => readYaml(profileFile()) ?? {},
+    /** 多份画像：只在界面里切换、新建、删除。id 是 profiles/ 下的文件名。 */
+    profiles() {
+      const cur = currentProfile();
+      const list = profileIds().map((id) => {
+        let name = '';
+        try {
+          name = String(readYaml(path.join(home, 'profiles', `${id}.yaml`))?.name ?? '');
+        } catch {}
+        return { id, name };
+      });
+      if (!list.some((p) => p.id === cur)) list.unshift({ id: cur, name: '' }); // 当前画像还没写过
+      return { current: cur, list };
+    },
+    useProfile(pid) {
+      if (!profileIds().includes(pid)) throw new Error(`没有这份画像：${pid}`);
+      roster.setState('profile', pid);
+    },
+    /** 新建：复制当前画像（没有时用模板）和头像，然后切换过去。 */
+    newProfile() {
+      const pid = newId('p');
+      const dir = path.join(home, 'profiles');
+      if (!existsSync(profileFile())) writeText(profileFile(), profileTemplate()); // 原来那份也落盘，才能切回去
+      writeText(path.join(dir, `${pid}.yaml`), readFileSync(profileFile(), 'utf8'));
+      const av = userAvatars().find((f) => existsSync(f));
+      if (av) copyFileSync(av, path.join(dir, `${pid}.avatar${path.extname(av)}`));
+      roster.setState('profile', pid);
+      return { id: pid };
+    },
+    deleteProfile(pid) {
+      if (pid === currentProfile()) throw new Error('正在用的画像不能删，先切换到别的');
+      if (!profileIds().includes(pid)) throw new Error(`没有这份画像：${pid}`);
+      for (const f of [`${pid}.yaml`, ...imageNames(`${pid}.avatar`)]) rmSync(path.join(home, 'profiles', f), { force: true });
+    },
     saveProfile(fields) {
       writeText(profileFile(), `# 用户画像：所有个体共享，写你希望它们知道的自己
 
@@ -862,7 +977,7 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
   } catch {} // 卡或画像读不了时不搬，不影响启动；本性那边会报出具体错误
 
   return {
-    nature, moment, afterTurn, remember, recall, dream, pendingDreams, releaseDraft, releaseResume, release, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
+    nature, moment, afterTurn, remember, recall, expand, dream, pendingDreams, releaseDraft, releaseResume, release, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
     get home() {
       return home;
     },

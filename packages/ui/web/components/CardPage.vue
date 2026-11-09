@@ -36,6 +36,19 @@ const open = guard(async (id) => {
   const card = await api('GET', `card?id=${encodeURIComponent(id)}`);
   for (const [k] of CARD) form[k] = typeof card[k] === 'string' ? card[k].replace(/\n$/, '') : '';
   saved.value = JSON.stringify(form);
+  versions.value = await api('GET', `card-versions?id=${encodeURIComponent(id)}`);
+});
+
+// 历史版本：每次改卡存上一版，最多 20 份；回滚时当前这版也存进去，所以回滚也能撤回
+const versions = ref([]);
+const when = (t) => new Date(t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const restore = guard(async (v) => {
+  if (!confirm(`回滚到 ${when(v.at)} 换下的「${v.name}」？${dirty.value ? '没保存的改动会丢掉。' : ''}当前这版会存进历史。`)) return;
+  await api('POST', `card-versions?id=${encodeURIComponent(editing.value)}&vid=${v.id}`);
+  saved.value = JSON.stringify(form); // 不再提示没保存的改动
+  await open(editing.value);
+  await load();
+  toast('已回滚，下一轮生效');
 });
 if (editing.value) open(editing.value);
 
@@ -50,6 +63,7 @@ const save = guard(async () => {
   await api('PUT', `card?id=${encodeURIComponent(editing.value)}`, { ...form });
   saved.value = JSON.stringify(form);
   toast('已保存，下一轮生效');
+  versions.value = await api('GET', `card-versions?id=${encodeURIComponent(editing.value)}`);
   await load();
 });
 
@@ -141,6 +155,18 @@ const savePortrait = guard(async () => {
         <button class="btn primary" type="button" :disabled="!dirty" @click="save">保存</button>
         <span :class="dirty ? 'dirty' : 'muted'">{{ dirty ? '有改动还没保存' : '已保存' }}</span>
       </div>
+
+      <!-- 历史版本 -->
+      <details class="field">
+        <summary>历史版本（{{ versions.length }}）</summary>
+        <p v-if="!versions.length" class="muted">还没改过。每次保存或手改 card.yaml，上一版都会存在这里，最多留 20 份。</p>
+        <ul v-else class="versions">
+          <li v-for="v in versions" :key="v.id" class="row" style="gap: 10px">
+            <span>{{ when(v.at) }} 换下的「{{ v.name }}」</span>
+            <button class="btn" type="button" @click="restore(v)">回滚到这版</button>
+          </li>
+        </ul>
+      </details>
     </div>
     <div class="panel preview">
       <div class="actions" style="justify-content: space-between; margin-bottom: 8px">

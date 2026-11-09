@@ -1,7 +1,7 @@
 // 记忆点：类型、鲜明度、此刻里的「记得的事」、只认「记住……」的窄规则。存取在 life.js。
 // 判断该记什么交给个体自己（chara_remember），这里不从原话里猜（2026-11-09 用户定，样本里值得记的约一成，规则提取做不准）。
 
-export const KINDS = { fact: '事实', preference: '喜好', promise: '约定', event: '事件', decision: '决定', feeling: '感受', rule: '规矩', lesson: '体会' };
+export const KINDS = { fact: '事实', preference: '喜好', promise: '约定', event: '事件', decision: '决定', feeling: '感受', rule: '规矩', lesson: '体会', pending: '待续' };
 export const MAX_LEN = 200;
 const DAY = 86_400_000;
 const TAU = 30 * DAY; // 一个月不被想起，鲜明度降到约 0.37
@@ -26,7 +26,7 @@ export const kindOf = (k) => (Object.hasOwn(KINDS, k) ? k : (Object.keys(KINDS).
  * @returns { kind, text }；kind 已给出有效类型时以它为准，开头的类型名照样摘掉
  */
 export function splitKind(text, kind) {
-  const m = new RegExp(`^(${Object.values(KINDS).join('|')})\s*[：:]\s*`).exec(text);
+  const m = new RegExp(`^(${Object.values(KINDS).join('|')})\\s*[：:]\\s*`).exec(text);
   const given = kind != null && String(kind).trim() !== '';
   return m ? { kind: given ? kindOf(kind) : kindOf(m[1]), text: text.slice(m[0].length) } : { kind: kindOf(kind), text };
 }
@@ -80,7 +80,8 @@ export function memoryLine(m, now, tz, user = '用户') {
  * @returns 若干行；一条都没有时为空数组
  */
 export function memoryLines(all, now, tz, { max = 20, chars = 800, user } = {}) {
-  const urgent = (m) => m.kind === 'promise' && m.due != null && m.due - now < 7 * DAY;
+  // 待续（没办完的事、没聊完的话题）和七天内到期的约定一样一直留在此刻，直到删掉或被取代
+  const urgent = (m) => m.kind === 'pending' || (m.kind === 'promise' && m.due != null && m.due - now < 7 * DAY);
   const rank = (m) => (m.pinned ? 3 : urgent(m) ? 2 : 0) + vividness(m, now);
   const live = all.filter((m) => m.replaced_by == null && (m.pinned || urgent(m) || vividness(m, now) >= FADED)).sort((a, b) => rank(b) - rank(a));
   const out = [];

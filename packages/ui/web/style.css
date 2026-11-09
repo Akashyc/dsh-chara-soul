@@ -346,3 +346,12 @@ details summary { cursor: pointer; font-weight: 700; margin: 18px 0 10px; }
 .select-list li.active { background: rgba(255,105,180,.16); }
 
 .select-list li[aria-selected="true"] { font-weight: 700; color: var(--pink); }
+
+/* 角色卡历史版本 */
+.versions {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 6px;
+}
