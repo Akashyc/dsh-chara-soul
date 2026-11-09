@@ -17,7 +17,7 @@ export function zone(tz) {
 }
 
 /** 某时刻在某时区的日历日期 YYYY-MM-DD。 */
-const dateIn = (ms, tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms);
+export const dateIn = (ms, tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms);
 
 /** 按用户时区的日历天数差：跨过几个午夜就是几天，夏令时交给 Intl。 */
 export function daysBetween(fromMs, toMs, tz) {

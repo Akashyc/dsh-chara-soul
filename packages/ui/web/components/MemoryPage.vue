@@ -4,7 +4,9 @@ import { ref, reactive, computed, watchEffect } from 'vue';
 import { state, current, api, toast, guard } from '../store.js';
 import Avatar from './Avatar.vue';
 import Select from './Select.vue';
+import DiaryList from './DiaryList.vue';
 
+const mode = ref('points'); // points 记忆点 | diary 日记
 const ORIGIN = { model: '它自己记的', rule: '你说「记住」时记的', user: '你手动加的' };
 
 const viewing = ref(current.value?.id ?? state.beings[0]?.id ?? null);
@@ -95,6 +97,12 @@ const remove = guard(async (m) => {
           <template #option="{ option }"><Avatar :being="option.being" size="sm" />{{ option.label }}</template>
         </Select>
       </div>
+      <div class="kinds" role="tablist" aria-label="看记忆点还是日记" style="margin-bottom: 18px">
+        <button type="button" role="tab" :aria-selected="mode === 'points'" :class="['chip', { on: mode === 'points' }]" @click="mode = 'points'">记忆点</button>
+        <button type="button" role="tab" :aria-selected="mode === 'diary'" :class="['chip', { on: mode === 'diary' }]" @click="mode = 'diary'">日记</button>
+      </div>
+      <p v-if="mode === 'diary'" class="muted" style="margin: 0; line-height: 1.7">它每天写一篇日记，每句后面的编号指回当时的原话或记忆点，点开能看。新的一天第一次聊完后，会补写前几天还没写的；也可以在右边选一天现在就写，或者重写某一篇（在 DSH 里输入 /chara dream 也行）。</p>
+      <template v-else>
       <b>加一条</b>
       <p class="muted" style="margin-top: 4px">它漏记、记错的，在这里补上或改掉。一条一件事，200 字以内。</p>
       <div class="field">
@@ -119,9 +127,11 @@ const remove = guard(async (m) => {
       <div class="actions" style="margin-top: 16px">
         <button class="btn primary" type="button" :disabled="!draft.text.trim()" @click="add">记下</button>
       </div>
+      </template>
     </div>
 
-    <div class="panel">
+    <DiaryList v-if="mode === 'diary'" :id="viewing" />
+    <div v-else class="panel">
       <div class="mem-filter">
         <input v-model="filter.q" type="search" placeholder="搜内容或说话的人" aria-label="搜索记忆">
         <div class="kinds" role="group" aria-label="按类型筛选">

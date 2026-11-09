@@ -70,6 +70,54 @@ export function apply(ctx, _config, deps = {}) {
   const mainSessions = new Set();
   let lastAssembly;
 
+  // 写日记用哪个模型：宿主没有全局默认，沿用主会话最近一次回复用的（宿主生成会话标题也是这么做的）
+  let route = null;
+  /**
+   * 一次性补全（001 号决定第四节）：无会话、无工具、无历史。失败按 code 抛错，由调用方报给用户。
+   * @returns 模型输出的正文
+   */
+  async function complete({ system, prompt, maxTokens }) {
+    const llm = ctx.get?.('llm');
+    if (!llm?.prepareCall) throw Object.assign(new Error('宿主没有模型调用服务'), { code: 'NO_LLM' });
+    if (!route) throw Object.assign(new Error('还不知道用哪个模型，先在主会话里聊一句'), { code: 'NO_ROUTE' });
+    const signal = AbortSignal.timeout(180_000);
+    const call = await llm.prepareCall({ ...route, maxTokens }, signal);
+    let text = '';
+    for await (const chunk of call.stream({ ...call.config, system, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }], purpose: 'chara-dream', signal })) {
+      if (chunk?.type === 'text-delta') text += chunk.text ?? '';
+      else if (chunk?.type === 'finish' && (chunk.reason?.kind === 'error' || chunk.reason?.kind === 'aborted')) {
+        throw Object.assign(new Error(chunk.reason.failure?.message ?? '模型调用失败'), { code: chunk.reason.failure?.code ?? chunk.reason.kind });
+      }
+    }
+    return text;
+  }
+
+  /** 界面和 /chara dream 用：写一篇日记，模型调用失败时把错误代码写进结果，不抛。 */
+  async function writeDiary(id, day) {
+    try {
+      return await core.dream({ id: id || undefined, day: day || undefined, complete });
+    } catch (e) {
+      return { ok: false, text: `写日记失败（${e?.code ?? e?.message ?? e}）` };
+    }
+  }
+
+  /** 醒来补做：把之前聊过天、还没写日记的日子补上。在回复之后后台写，不拖慢回复；同一时间只写一份。 */
+  let dreaming = false;
+  async function catchUp() {
+    if (dreaming || !route) return;
+    dreaming = true;
+    try {
+      for (const day of core.pendingDreams()) {
+        const r = await core.dream({ day, complete });
+        log.info('补写日记 %s：%s', day, r.ok ? '已写好' : r.text);
+      }
+    } catch (e) {
+      log.warn('补写日记失败：%s', e?.code ?? e?.message ?? e);
+    } finally {
+      dreaming = false;
+    }
+  }
+
   /** 某个会话正在用的预设 id；宿主没有预设服务时退回会话头里记的，都拿不到时为 undefined。 */
   const presetOf = (agent) => ctx.get?.('agentPresets')?.composedPreset?.(agent?.ctx) ?? agent?.session?.header?.agentPreset;
 
@@ -161,6 +209,9 @@ export function apply(ctx, _config, deps = {}) {
         core.afterTurn({ session: sid, role: 'user', text: messageText(message), tz: message.source.clientTimeZone });
       } else if (mainSessions.has(sid)) {
         core.afterTurn({ session: sid, role: 'assistant', text: messageText(message) });
+        const src = message?.source;
+        if (src?.provider && src?.model) route = { provider: src.provider, model: src.model };
+        if (messageText(message).trim()) catchUp(); // 不 await：回复已经发出去了，日记在后台写
       }
     } catch (e) {
       log.warn('记录原话失败：%s', e?.message ?? e);
@@ -261,7 +312,7 @@ export function apply(ctx, _config, deps = {}) {
   const UI_PATH = '/x-chara-soul';
   const token = randomBytes(16).toString('hex');
   ctx.inject(['webServer'], (c) => {
-    c.effect(() => c.webServer.register({ kind: 'prefix', path: UI_PATH, handler: createUiHandler(core, { prefix: UI_PATH, token, onChange: () => sync(), presets: listPresets }) }));
+    c.effect(() => c.webServer.register({ kind: 'prefix', path: UI_PATH, handler: createUiHandler(core, { prefix: UI_PATH, token, onChange: () => sync(), presets: listPresets, dream: writeDiary }) }));
   });
   const uiLink = () => {
     const port = ctx.get?.('webServer')?.port;
@@ -279,12 +330,17 @@ export function apply(ctx, _config, deps = {}) {
     c.effect(() =>
       c.commands.register({
         name: 'chara',
-        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | show | reminisce <关键词> | profile | status | ui',
-        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | show | reminisce <关键词> | profile | status | ui' },
+        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | show | reminisce <关键词> | dream [日期] | profile | status | ui',
+        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | show | reminisce <关键词> | dream [日期] | profile | status | ui' },
         handler: async (inv) => {
           const raw = String(inv.rawInput ?? '').trim();
           if (raw === 'status') return { kind: 'success', text: status(inv) };
           if (raw === 'ui') return { kind: 'success', text: uiLink() };
+          const dream = /^dream(?:\s+(\S+))?$/.exec(raw);
+          if (dream) {
+            const r = await writeDiary(null, dream[1]);
+            return { kind: r.ok ? 'success' : 'error', text: r.text };
+          }
           const r = core.command(raw);
           sync();
           let text = r.text;

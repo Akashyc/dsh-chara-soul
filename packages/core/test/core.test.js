@@ -333,6 +333,60 @@ test('记忆点：自己记、改口取代、约定到期、窄规则、淡忘�
     assert.throws(() => core.view.saveMemory(id, 999, { text: 'a' }), /没有这条记忆/);
   }));
 
+test('入梦：一天写一篇日记，每句带出处，对不上的丢掉；补写、删了重写', async () => {
+  const home = mkdtempSync(path.join(tmpdir(), '入梦 '));
+  let t = Date.parse('2026-11-07T02:00:00Z'); // 上海 11 月 7 日 10:00
+  const core = createCore({ home, now: () => t, host: 'test' });
+  try {
+    let asked;
+    const complete = async (req) => ((asked = req), reply);
+    let reply = '';
+    assert.match((await core.dream({ complete })).text, /还没有个体/);
+    core.command('new 甲');
+    assert.match((await core.dream({ complete })).text, /没有聊天/);
+    assert.match((await core.dream({ day: '昨天', complete })).text, /YYYY-MM-DD/);
+    assert.match((await core.dream({})).text, /只能在 DSH 里/);
+
+    core.afterTurn({ session: 's', role: 'user', text: '今天去体检了', tz: 'Asia/Shanghai' });
+    core.afterTurn({ session: 's', role: 'assistant', text: '辛苦啦' });
+    core.remember({ content: '用户今天去体检', kind: 'event' });
+    t += 15 * 3600_000; // 11 月 8 日 01:00，前一天的事
+    core.afterTurn({ session: 's', role: 'user', text: '晚安' });
+
+    reply = 'Boss 今天去体检了。[t1][m1]我说辛苦啦[t2]。\n\n还编了一句没出处的话。这句的编号不存在。[t99]';
+    const r = await core.dream({ day: '2026-11-07', complete });
+    assert.ok(r.ok, r.text);
+    assert.ok(asked.prompt.includes('[t1] 10:00 用户：今天去体检了'));
+    assert.ok(asked.prompt.includes('[m1] 用户今天去体检'));
+    assert.doesNotMatch(asked.prompt, /晚安/, '别的日子的话不给');
+    assert.match(asked.system, /你是甲/, '用个体自己的口吻');
+    const id = core.view.beings()[0].id;
+    const [d] = core.view.diaries(id);
+    assert.equal(d.day, '2026-11-07');
+    assert.equal(d.text, 'Boss 今天去体检了。[t1][m1]我说辛苦啦。[t2]', '没出处、出处对不上的句子丢掉');
+    assert.equal(d.sources.t1, '11/7 10:00 用户：今天去体检了');
+    assert.match(d.sources.m1, /记忆 #1：用户今天去体检/);
+
+    assert.deepEqual(core.pendingDreams(), [], '写过的不再补');
+    core.view.deleteDiary(id, '2026-11-07');
+    assert.deepEqual(core.pendingDreams(), ['2026-11-07'], '删了之后可以重写（验收 9）');
+    reply = '全是没出处的话。';
+    assert.match((await core.dream({ day: '2026-11-07', complete })).text, /没有标出处/);
+    assert.deepEqual(core.view.diaries(id), [], '一句有效的都没有时不保存');
+    await assert.rejects(core.dream({ day: '2026-11-07', complete: async () => { throw new Error('RATE_LIMIT'); } }), /RATE_LIMIT/);
+
+    // 界面里给不是当前的个体写
+    core.command('new 乙');
+    reply = 'Boss 今天去体检了。[t1]';
+    assert.ok((await core.dream({ id, day: '2026-11-07', complete })).ok);
+    assert.deepEqual(core.view.diaries(id).map((x) => x.day), ['2026-11-07'], '写进甲的日记，不是当前的乙');
+    assert.match(asked.system, /你是甲/);
+  } finally {
+    core.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('换数据目录：搬过去照常用、写指向文件、旧目录不动；各种拒绝；删旧目录', () => {
   const root = mkdtempSync(path.join(tmpdir(), '迁移 测试 '));
   const old = path.join(root, '旧');

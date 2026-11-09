@@ -36,6 +36,7 @@ function fakeCtx() {
   return { ctx, live, emit, fire, run, tools, services };
 }
 
+const DAY = 86_400_000;
 const userMsg = (text, rpcId) => ({ role: 'user', source: rpcId ? { kind: 'user', rpcId, clientTimeZone: 'Asia/Shanghai' } : { kind: 'user' }, content: [{ type: 'text', text }] });
 const asstMsg = (text) => ({ turn: 1, step: 1, message: { content: text ? [{ type: 'text', text }] : [{ type: 'tool-call' }] } });
 
@@ -206,6 +207,63 @@ test('分身：chara_envoy 派出带底线的简报，结算时把任务与汇�
 
     services.subagents = { startActivation: async () => { throw Object.assign(new Error('满了'), { code: 'ACTIVATION_LIMIT_REACHED' }); } };
     assert.match(await envoy.execute({ task: '再修一个' }, exec), /ACTIVATION_LIMIT_REACHED.*自己把事办完/);
+  } finally {
+    core.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('入梦：沿用主会话的模型写日记；/chara dream 立即写；回复之后后台补写前几天', async () => {
+  const home = mkdtempSync(path.join(tmpdir(), '入梦 '));
+  let t = Date.parse('2026-11-07T02:00:00Z'); // 上海 11 月 7 日 10:00
+  const core = createCore({ home, host: 'dsh', now: () => t });
+  try {
+    const { ctx, emit, run, services } = fakeCtx();
+    apply(ctx, {}, { core });
+    await run('new 小鲸');
+    const id = core.view.beings()[0].id;
+    assert.equal((await run('dream')).kind, 'error', '没有模型调用服务时报错，不崩');
+
+    const calls = [];
+    let reply = '今天 Boss 来找我聊天。[t1]';
+    services.llm = {
+      prepareCall: async (opts) => ({
+        config: { ...opts },
+        stream: async function* (o) {
+          calls.push(o);
+          if (reply === 'fail') return yield { type: 'finish', reason: { kind: 'error', failure: { code: 'RATE_LIMIT', message: '太快了' } } };
+          yield { type: 'text-delta', text: reply };
+          yield { type: 'finish', reason: { kind: 'stop' } };
+        },
+      }),
+    };
+    const main = { id: 'session-1', header: { delegationDepth: 0 } };
+    const said = (text) => ({ turn: 1, step: 1, message: { content: [{ type: 'text', text }], source: { kind: 'model', provider: 'volces', model: 'deepseek-flash' } } });
+    assert.match((await run('dream')).text, /先在主会话里聊一句|没有聊天/);
+    emit(main, 'user/message', userMsg('早上好', 'r1'));
+    emit(main, 'assistant/message', said('早'));
+    await new Promise((r) => setImmediate(r));
+    assert.equal(calls.length, 0, '今天的不自动写');
+
+    const r = await run('dream');
+    assert.equal(r.kind, 'success', r.text);
+    assert.equal(calls[0].provider, 'volces');
+    assert.equal(calls[0].model, 'deepseek-flash', '沿用主会话最近一次回复用的模型');
+    assert.match(calls[0].system, /你是小鲸/);
+    assert.equal(calls[0].purpose, 'chara-dream');
+    assert.deepEqual(core.view.diaries(id).map((d) => d.day), ['2026-11-07']);
+
+    reply = 'fail';
+    assert.match((await run('dream')).text, /RATE_LIMIT/, '按错误代码报');
+
+    core.view.deleteDiary(id, '2026-11-07');
+    reply = '昨天 Boss 跟我说早上好。[t1]';
+    t += DAY;
+    emit(main, 'user/message', userMsg('又是新的一天', 'r2'));
+    emit(main, 'assistant/message', said('早呀'));
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    assert.deepEqual(core.view.diaries(id).map((d) => d.day), ['2026-11-07'], '新的一天回复之后补写昨天');
+    assert.match(core.view.diaries(id)[0].text, /昨天 Boss 跟我说早上好/);
   } finally {
     core.close();
     rmSync(home, { recursive: true, force: true });

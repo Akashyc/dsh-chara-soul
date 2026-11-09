@@ -39,6 +39,12 @@ const STEPS = [
     );`);
     ftsIndex(s, 'memories', ['text']);
   },
+  // 日记（M4）：一天一篇，day 是个体所在时区的 YYYY-MM-DD；正文里的 [t12] [m3] 指回原话和记忆点。删了可以重写
+  `CREATE TABLE diaries (
+     day TEXT PRIMARY KEY,
+     text TEXT NOT NULL,
+     created INTEGER NOT NULL
+   );`,
 ];
 
 const MEMORY_FIELDS = ['kind', 'text', 'speaker', 'due', 'pinned', 'replaced_by'];
@@ -83,6 +89,15 @@ export function openLife(dir) {
     /** 想起过：更新最近一次被用到的时刻，鲜明度回升。 */
     touchMemories: (ids, at) => ids.forEach((id) => db.prepare('UPDATE memories SET touched = ? WHERE id = ?').run(at, id)),
     searchMemories: (query, limit = 8) => search(store, 'memories', 'text', query, limit),
+    /** [from, to) 之间的原话，按时间排。 */
+    turnsBetween: (from, to) => db.prepare('SELECT * FROM turns WHERE at >= ? AND at < ? ORDER BY at, id').all(from, to),
+    turnTimes: () => db.prepare('SELECT at FROM turns ORDER BY at').all().map((r) => r.at),
+    turnsByIds: (ids) => (ids.length ? db.prepare(`SELECT * FROM turns WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) : []),
+    diaries: () => db.prepare('SELECT * FROM diaries ORDER BY day DESC').all(),
+    diary: (day) => db.prepare('SELECT * FROM diaries WHERE day = ?').get(day) ?? null,
+    /** 同一天重写时覆盖。 */
+    saveDiary: (day, text, at) => db.prepare('INSERT INTO diaries (day, text, created) VALUES (?, ?, ?) ON CONFLICT(day) DO UPDATE SET text = excluded.text, created = excluded.created').run(day, text, at),
+    deleteDiary: (day) => db.prepare('DELETE FROM diaries WHERE day = ?').run(day),
     close: () => db.close(),
   };
 }

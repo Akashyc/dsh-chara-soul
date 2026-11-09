@@ -7,10 +7,12 @@ import { openRoster } from './roster/index.js';
 import { readCard, readYaml, writeText, validateCard, cardText, cardTemplate, profileTemplate, field } from './card/index.js';
 import { readTavernJson, fromTavern } from './card/tavern.js';
 import { buildNature, buildBrief } from './nature/index.js';
-import { floor5, zone, timeLines, daysBetween, relative } from './chrono/index.js';
+import { floor5, zone, timeLines, daysBetween, relative, dateIn } from './chrono/index.js';
 import { openLife } from './memory/life.js';
+import { dreamPrompt, checkDiary } from './memory/dream.js';
 import { KINDS, vividness, memoryText, kindOf, explicitRemember, memoryLine, memoryLines, endOfDay, splitKind } from './memory/points.js';
 
+const DAY = 86_400_000;
 const mtime = (f) => (existsSync(f) ? statSync(f).mtimeMs : 0);
 const CARD_FIELDS = ['name', 'appearance', 'personality', 'speech', 'relationship', 'first_mes', 'mes_example'];
 const PROFILE_FIELDS = ['name', 'call_me', 'appearance', 'traits', 'likes', 'taboos'];
@@ -166,6 +168,45 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     return out.join('\n');
   }
 
+  /**
+   * 入梦：给某一天写一篇日记（架构方案 10.6）。每句带出处，出处对不上的句子丢掉；同一天重写时覆盖。
+   * @param day 个体所在时区的 YYYY-MM-DD；不给时写今天
+   * @param complete 适配器提供的一次性补全 ({ system, prompt, maxTokens }) → 文本；没有时不能入梦
+   * @param id 给哪个个体写；不给时写当前个体（界面里可以选别的个体）
+   * @returns { ok, text }；模型调用失败时抛错，由调用方决定怎么报
+   */
+  async function dream({ day, complete, id } = {}) {
+    const c = id ? being(known(id)) : current();
+    if (!c) return fail('还没有个体，没有可入梦的。');
+    if (!complete) return fail('入梦要调用模型写日记，只能在 DSH 里用 /chara dream。');
+    const tz = zone(c.life.meta('tz'));
+    const d = String(day || dateIn(now(), tz)).trim();
+    const end = endOfDay(d, tz) + 1000; // 次日 0 点
+    if (Number.isNaN(end)) return fail(`日期要写成 YYYY-MM-DD，收到的是「${d}」。`);
+    const from = end - DAY;
+    const turns = c.life.turnsBetween(from, end);
+    if (!turns.length) return fail(`${d} 没有聊天，没什么可写的。`);
+    const inDay = (t) => t >= from && t < end;
+    const memories = c.life.memories().filter((m) => inDay(m.created) || inDay(m.touched));
+    const { prompt, tags } = dreamPrompt({ day: d, turns, memories, tz, who: userName() });
+    const text = checkDiary(await complete({ system: c.nature, prompt, maxTokens: 4000 }), tags);
+    if (!text) return fail('模型写的日记没有标出处，没有保存。');
+    c.life.saveDiary(d, text, now());
+    return ok(`已写好 ${d} 的日记。\n\n${text}`);
+  }
+
+  /**
+   * 该补写日记的日子：聊过天、还没有日记、在今天之前的，最多最近 limit 天。醒来时由适配器补做。
+   * shortcut: 每次都读全部原话的时间，原话到几十万条时改成按天汇总的查询
+   */
+  function pendingDreams(limit = 3) {
+    const c = current();
+    if (!c) return [];
+    const tz = zone(c.life.meta('tz'));
+    const today = dateIn(now(), tz);
+    return [...new Set(c.life.turnTimes().map((t) => dateIn(t, tz)))].filter((d) => d < today && !c.life.diary(d)).slice(-limit);
+  }
+
   /** 分身的简报。没有个体或没有任务时返回空串。 */
   function envoyBrief(args = {}) {
     const row = current()?.row;
@@ -238,12 +279,13 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
       return ok([`【本性】\n${c.nature}`, `【此刻】\n${moment(false)}`, c.error ? `⚠ 角色卡读取出错，仍在用上一版：${c.error}` : ''].filter(Boolean).join('\n\n'));
     },
     reminisce: (q) => ok(recall(q)),
+    dream: () => fail('入梦要调用模型写日记，只能在 DSH 里用 /chara dream。'),
     profile() {
       const f = profileFile();
       if (!existsSync(f)) writeText(f, profileTemplate());
       return ok(`用户画像在 ${f}，编辑保存后下一轮生效。`);
     },
-    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | show | reminisce <关键词> | profile'),
+    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | show | reminisce <关键词> | dream [日期] | profile'),
   };
 
   /** 用户命令。raw 是子命令及参数的原文，如 "use 蒂普茜柯"。 */
@@ -363,6 +405,20 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
       if ('text' in f) life.touchMemories([Number(mid)], now());
     },
     deleteMemory: (id, mid) => being(known(id)).life.deleteMemory(Number(mid)),
+    /** 日记页：一个个体的全部日记（新的在前），附上正文里每个出处编号对应的原话或记忆点。 */
+    diaries(id) {
+      const life = being(known(id)).life;
+      const name = roster.get(id).name;
+      const when = new Intl.DateTimeFormat('zh-CN', { timeZone: zone(life.meta('tz')), month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+      return life.diaries().map((d) => {
+        const ids = (k) => [...new Set([...d.text.matchAll(new RegExp(`\\[${k}(\\d+)\\]`, 'g'))].map((x) => Number(x[1])))];
+        const sources = {};
+        for (const t of life.turnsByIds(ids('t'))) sources[`t${t.id}`] = `${when.format(t.at)} ${t.role === 'user' ? userName() : name}：${t.text}`;
+        for (const mid of ids('m')) sources[`m${mid}`] = life.memory(mid) ? `记忆 #${mid}：${life.memory(mid).text}` : `记忆 #${mid}（已删除）`;
+        return { ...d, sources };
+      });
+    },
+    deleteDiary: (id, day) => being(known(id)).life.deleteDiary(String(day)),
     userAvatarFile: () => userAvatars().find((f) => existsSync(f)) ?? null,
     /** 换用户头像（画像页），换格式时删掉旧文件 */
     saveUserAvatar(buf) {
@@ -479,7 +535,7 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
   } catch {} // 卡或画像读不了时不搬，不影响启动；本性那边会报出具体错误
 
   return {
-    nature, moment, afterTurn, remember, recall, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
+    nature, moment, afterTurn, remember, recall, dream, pendingDreams, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
     get home() {
       return home;
     },

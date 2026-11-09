@@ -110,6 +110,11 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal((await call('PUT', mem('&mid=999'), { text: 'x' })).status, 400);
     assert.equal((await call('DELETE', mem(`&mid=${mid}`))).status, 200);
     assert.deepEqual((await call('GET', mem())).data.items, []);
+    // 日记：看、删（写要调模型，只在 DSH 里用 /chara dream）
+    assert.deepEqual((await call('GET', `/api/diaries?id=${tian.id}`)).data, []);
+    assert.match((await call('POST', `/api/diaries?id=${tian.id}&day=2026-11-07`)).data.error, /只能在 DSH 里/, '独立运行时没有模型可调');
+    assert.equal((await call('DELETE', `/api/diaries?id=${tian.id}&day=2026-11-07&t=tk`, undefined, {})).status, 403, '删日记只认请求头');
+    assert.equal((await call('DELETE', `/api/diaries?id=${tian.id}&day=2026-11-07`)).status, 200);
 
     const s = (await call('GET', '/api/settings')).data;
     assert.equal(s.envoyPreset, 'chara-soul-envoy');
