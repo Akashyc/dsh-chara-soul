@@ -2,6 +2,9 @@
 import { ref, computed } from 'vue';
 import { state, api, load, toast, guard } from '../store.js';
 import Select from './Select.vue';
+import TextField from './ui/TextField.vue';
+import AppearancePanel from './AppearancePanel.vue';
+import { ask } from './ui/dialog.js';
 
 const settings = ref(null); // { envoyPreset, presets: [{ id, name }] | null, home: { home, source, previous, warning } }
 const envoyPreset = ref('');
@@ -48,7 +51,7 @@ const moveHome = guard(async () => {
   const to = target.value.trim();
 
   if (!to || moving.value) return;
-  if (!confirm(`把所有个体、记忆和画像复制到\n${to}\n复制并核对通过后改用新目录，旧目录保留，之后可以在这里删除。\n\n迁移前请关掉终端里的 npx chara ui。继续吗？`)) return;
+  if (!(await ask({ title: '迁移数据目录', confirm: '迁移', text: `把所有个体、记忆和画像复制到\n${to}\n复制并核对通过后改用新目录，旧目录保留，之后可以在这里删除。\n\n迁移前请关掉终端里的 npx chara ui。继续吗？` }))) return;
   moving.value = true;
 
   try {
@@ -78,7 +81,7 @@ const pack = guard(async () => {
     const { path } = await api('POST', 'pick-folder');
     if (!path) return;
     const moving = packTarget.value !== '画像';
-    if (moving && !confirm(`打包到\n${path}\n\n打进包的个体在本机标为已迁出，不能再切换过去；要撤销，在个体页点它唤醒。继续吗？`)) return;
+    if (moving && !(await ask({ title: '打包迁移', confirm: '打包', text: `打包到\n${path}\n\n打进包的个体在本机标为已迁出，不能再切换过去；要撤销，在个体页点它唤醒。继续吗？` }))) return;
     toast((await api('POST', 'migrate', { target: packTarget.value, dir: path })).text.split('\n')[0]);
     await load();
   } finally {
@@ -88,7 +91,7 @@ const pack = guard(async () => {
 
 /** 删除迁移后留下的旧目录里的数据，二次确认。 */
 const removeOld = guard(async () => {
-  if (!confirm(`删除旧目录里的数据？\n${settings.value.home.previous}\n删除后不能恢复。`)) return;
+  if (!(await ask({ title: '删除旧目录', confirm: '删除', danger: true, text: `删除旧目录里的数据？\n${settings.value.home.previous}\n删除后不能恢复。` }))) return;
   await api('DELETE', 'home');
   toast('旧目录已删除');
   await refresh();
@@ -96,10 +99,11 @@ const removeOld = guard(async () => {
 </script>
 
 <template>
-  <h2>设置</h2>
+  <h2>设置 <span class="cap">Settings</span></h2>
+  <AppearancePanel />
   <template v-if="settings">
     <!-- 分身用的预设：只有宿主列得出预设（目前只有 DSH）才有意义，独立运行时不显示 -->
-    <div v-if="settings.presets?.length" class="panel" style="max-width: 760px; margin-bottom: 18px">
+    <div v-if="settings.presets?.length" class="panel">
       <div class="field">
         <label for="envoy-preset">分身用的预设</label>
         <Select id="envoy-preset" v-model="envoyPreset" :options="presetOptions" />
@@ -109,7 +113,7 @@ const removeOld = guard(async () => {
     </div>
 
     <!-- 打迁移包：换电脑时用；导入在个体页 -->
-    <div class="panel" style="max-width: 760px; margin-bottom: 18px">
+    <div class="panel">
       <div class="field">
         <label for="pack-target">打包迁移</label>
         <Select id="pack-target" v-model="packTarget" :options="packOptions" />
@@ -119,7 +123,7 @@ const removeOld = guard(async () => {
     </div>
 
     <!-- 数据目录 -->
-    <div class="panel" style="max-width: 760px">
+    <div class="panel">
       <div class="field">
         <label>数据目录</label>
         <code class="path">{{ settings.home.home }}</code>
@@ -130,7 +134,7 @@ const removeOld = guard(async () => {
       <div v-if="settings.home.source !== 'env'" class="field">
         <label for="home-target">迁移到</label>
         <div class="row">
-          <input id="home-target" v-model="target" placeholder="空目录或还不存在的目录的完整路径，如 D:\灵魂" @keydown.enter="moveHome">
+          <TextField id="home-target" v-model="target" placeholder="空目录或还不存在的目录的完整路径，如 D:\灵魂" @keydown.enter="moveHome" />
           <button class="btn" type="button" :disabled="picking" @click="browse">选择文件夹</button>
         </div>
         <span class="muted">只复制不移动，核对无误后才切换。不要选网盘同步文件夹（OneDrive、坚果云等），同步会弄坏数据库。</span>
@@ -142,7 +146,7 @@ const removeOld = guard(async () => {
       <div v-if="settings.home.previous" class="field" style="margin: 18px 0 0">
         <label>旧目录还在</label>
         <code class="path">{{ settings.home.previous }}</code>
-        <div class="actions"><button class="btn" type="button" @click="removeOld">删除旧目录</button></div>
+        <div class="actions"><button class="btn danger" type="button" @click="removeOld">删除旧目录</button></div>
       </div>
     </div>
   </template>

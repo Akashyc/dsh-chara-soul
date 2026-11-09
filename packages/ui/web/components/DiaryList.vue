@@ -2,6 +2,8 @@
 // 日记：一天一篇，正文里的 [t12] [m3] 是出处，点开看当时的原话或记忆点（验收 9）。写日记要调模型，只在 DSH 里能写
 import { ref, reactive, watch } from 'vue';
 import { api, toast, guard } from '../store.js';
+import DatePicker from './ui/DatePicker.vue';
+import { ask } from './ui/dialog.js';
 
 const props = defineProps({ id: { type: String, required: true } });
 const list = ref([]);
@@ -30,7 +32,7 @@ function toggle(day, tag) {
  * @param d 日期 YYYY-MM-DD
  */
 const write = guard(async (d) => {
-  if (list.value.some((x) => x.day === d) && !confirm(`${d} 已经有日记了，重写会覆盖掉现在这篇，继续吗？`)) return;
+  if (list.value.some((x) => x.day === d) && !(await ask({ title: '重写日记', text: `${d} 已经有日记了，重写会覆盖掉现在这篇，继续吗？`, confirm: '重写' }))) return;
   busy.value = d;
   try {
     await api('POST', q(d));
@@ -42,7 +44,7 @@ const write = guard(async (d) => {
 });
 
 const remove = guard(async (d) => {
-  if (!confirm(`删掉 ${d.day} 的日记？删了还能重写，但重写的内容会不一样。`)) return;
+  if (!(await ask({ title: '删除日记', text: `删掉 ${d.day} 的日记？删了还能重写，但重写的内容会不一样。`, confirm: '删除', danger: true }))) return;
   await api('DELETE', q(d.day));
   delete opened[d.day];
   await load();
@@ -53,14 +55,14 @@ const remove = guard(async (d) => {
 <template>
   <div class="panel">
     <div class="actions" style="margin-bottom: 18px">
-      <input v-model="day" type="date" aria-label="写哪一天的日记" style="width: 180px">
+      <DatePicker v-model="day" placeholder="写哪一天的日记" aria-label="写哪一天的日记" style="width: 180px" />
       <button class="btn primary" type="button" :disabled="!day || !!busy" @click="write(day)">{{ busy ? `正在写 ${busy} 的…` : '写这天的日记' }}</button>
       <span class="muted">要调一次模型，等几十秒</span>
     </div>
     <p v-if="!list.length" class="muted empty">还没有日记。新的一天第一次聊完后，它会补写前几天的；也可以在上面选一天，现在就写。</p>
     <article v-for="d in list" :key="d.day" class="diary">
       <div class="mem-head">
-        <span class="badge">{{ d.day }}</span>
+        <span class="tag ac num">{{ d.day }}</span>
         <span class="muted" style="flex: 1">写于 {{ new Date(d.created).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</span>
         <button class="link" type="button" :disabled="!!busy" @click="write(d.day)">{{ busy === d.day ? '正在重写…' : '重写' }}</button>
         <button class="link bad" type="button" @click="remove(d)">删除</button>

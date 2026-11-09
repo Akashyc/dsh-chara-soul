@@ -1,5 +1,6 @@
 // 全局状态与接口：页面少、状态简单，用一个 reactive 对象就够，不引入状态库
 import { reactive, computed } from 'vue';
+import { ask } from './components/ui/dialog.js';
 
 const token = new URLSearchParams(location.search).get('t') ?? '';
 const base = location.pathname.replace(/\/(index\.html)?$/, '');
@@ -43,12 +44,23 @@ export const guard = (fn) => async (...a) => {
   }
 };
 
+/**
+ * 切到另一页；当前页有没保存的改动时先确认，免得切走就丢。
+ * @param id 页签 id
+ */
+export async function go(id) {
+  if (id === state.tab) return;
+  if (state.dirty && !(await ask({ title: '离开这一页', text: '有改动还没保存，离开这一页会丢掉这些改动，继续吗？', confirm: '离开' }))) return;
+  state.dirty = false;
+  state.tab = id;
+}
+
 export const STATUS = { dormant: '在休眠', migrated: '已迁出' };
 
 export async function use(b) {
   if (b.current) return;
   if (b.status !== 'awake') {
-    if (!confirm(`「${b.name}」${STATUS[b.status]}，${b.status === 'migrated' ? '在这里唤醒等于撤销迁出（另一台电脑上那份会和这里各过各的），' : ''}唤醒并切换过去吗？`)) return;
+    if (!(await ask({ title: `唤醒「${b.name}」`, text: `「${b.name}」${STATUS[b.status]}，${b.status === 'migrated' ? '在这里唤醒等于撤销迁出（另一台电脑上那份会和这里各过各的），' : ''}唤醒并切换过去吗？`, confirm: '唤醒并切换' }))) return;
     await api('POST', 'wake', { id: b.id });
   }
   toast((await api('POST', 'use', { id: b.id })).text);
@@ -57,7 +69,7 @@ export async function use(b) {
 
 /** 休眠：只是不出场，年龄照算；要切换过去得先唤醒 */
 export async function sleep(b) {
-  if (!confirm(`让「${b.name}」休眠吗？休眠后要先唤醒才能切换过去${b.current ? '；它是当前个体，休眠后下一轮不注入任何内容' : ''}。`)) return;
+  if (!(await ask({ title: `让「${b.name}」休眠`, text: `让「${b.name}」休眠吗？休眠后要先唤醒才能切换过去${b.current ? '；它是当前个体，休眠后下一轮不注入任何内容' : ''}。`, confirm: '休眠' }))) return;
   toast((await api('POST', 'sleep', { id: b.id })).text);
   await load();
 }

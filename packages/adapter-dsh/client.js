@@ -110,6 +110,30 @@ window.__ModuleLoader__.load({
                     } catch (e) { /* 跨源或已卸载，忽略 */ }
                 }
                 push()
+
+                // 主题色联动：宿主窗口上装了「全鲸封锁」时它会设 __dshAccent、改色时发 dsh-accent；
+                // 这里转进 iframe，iframe 里保存主题色时再转回宿主。没装皮肤就没人发也没人听，各管各的
+                const isHex = function (s) { return typeof s === 'string' && /^#[0-9a-f]{6}$/i.test(s) }
+                const pushAccent = function (accent) {
+                    const win = frameRef.current && frameRef.current.contentWindow
+                    if (!win || !isHex(accent)) return
+                    try {
+                        win.postMessage({ type: 'chara:accent', accent: accent }, location.origin)
+                    } catch (e) { /* 已卸载，忽略 */ }
+                }
+                const onHostAccent = function (e) {
+                    const d = (e && e.detail) || {}
+                    if (d.source !== 'chara-soul') pushAccent(d.accent)
+                }
+                const onFrameAccent = function (e) {
+                    const win = frameRef.current && frameRef.current.contentWindow
+                    const d = e.data
+                    if (!win || e.source !== win || e.origin !== location.origin || !d || d.type !== 'chara:accent' || !isHex(d.accent)) return
+                    window.dispatchEvent(new CustomEvent('dsh-accent', { detail: { accent: d.accent, source: 'chara-soul' } }))
+                }
+                pushAccent(window.__dshAccent)
+                window.addEventListener('dsh-accent', onHostAccent)
+                window.addEventListener('message', onFrameAccent)
                 let mo = null
                 try {
                     mo = new MutationObserver(push)
@@ -126,6 +150,8 @@ window.__ModuleLoader__.load({
                 return function () {
                     if (mo) mo.disconnect()
                     if (media) media.removeEventListener('change', push)
+                    window.removeEventListener('dsh-accent', onHostAccent)
+                    window.removeEventListener('message', onFrameAccent)
                 }
             }, [])
 
@@ -147,6 +173,8 @@ window.__ModuleLoader__.load({
                                 if (win) {
                                     try {
                                         win.postMessage({ type: 'chara:theme', theme: hostTheme() }, location.origin)
+                                        // 皮肤在的话以它的主题色为准，界面那边收到后存进自己的设置
+                                        if (/^#[0-9a-f]{6}$/i.test(window.__dshAccent)) win.postMessage({ type: 'chara:accent', accent: window.__dshAccent }, location.origin)
                                     } catch (e) { /* 忽略 */ }
                                 }
                             },

@@ -6,7 +6,7 @@ import { pickFolder as systemPicker } from './pick-folder.js';
 
 // 页面由 Vite 构建到 dist/（npm run build）；静态文件不含数据，不需要令牌
 const DIST = new URL('../dist/', import.meta.url);
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const MAX_BODY = 20 * 1024 * 1024;
 
 function readBody(req) {

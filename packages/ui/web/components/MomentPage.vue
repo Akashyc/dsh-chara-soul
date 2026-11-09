@@ -13,12 +13,12 @@ const warn = computed(() => (state.show.match(/⚠.*/) ?? [])[0]);
 </script>
 
 <template>
-  <h2>此刻</h2>
+  <h2>此刻 <span class="cap">Moment</span></h2>
   <div v-if="!current" class="panel empty"><p>还没有个体，本轮不注入任何内容。</p></div>
   <div v-else class="now">
     <div class="panel me" :style="{ '--c': colorOf(current) }">
       <Avatar :being="current" size="lg" />
-      <div style="font-size: 24px; font-weight: 800">{{ current.name }}</div>
+      <div style="font-size: 22px; font-weight: 600">{{ current.name }}</div>
       <span class="badge">{{ ageText(current) }}</span>
       <span class="muted">{{ seenText(current) }}</span>
     </div>

@@ -5,6 +5,8 @@ import Avatar from './Avatar.vue';
 import AvatarCrop from './AvatarCrop.vue';
 import Fields from './Fields.vue';
 import Select from './Select.vue';
+import FilePicker from './ui/FilePicker.vue';
+import { ask } from './ui/dialog.js';
 
 const CARD = [
   ['name', '名字', '必填', 'input'],
@@ -31,7 +33,7 @@ const beingOptions = computed(() => state.beings.map((b) => ({ value: b.id, labe
  * @param id 个体 id
  */
 const open = guard(async (id) => {
-  if (id !== editing.value && dirty.value && !confirm('角色卡有改动还没保存，切换会丢掉这些改动，继续吗？')) return;
+  if (id !== editing.value && dirty.value && !(await ask({ title: '切换个体', text: '角色卡有改动还没保存，切换会丢掉这些改动，继续吗？', confirm: '切换' }))) return;
   editing.value = id;
   const card = await api('GET', `card?id=${encodeURIComponent(id)}`);
   for (const [k] of CARD) form[k] = typeof card[k] === 'string' ? card[k].replace(/\n$/, '') : '';
@@ -43,7 +45,7 @@ const open = guard(async (id) => {
 const versions = ref([]);
 const when = (t) => new Date(t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const restore = guard(async (v) => {
-  if (!confirm(`回滚到 ${when(v.at)} 换下的「${v.name}」？${dirty.value ? '没保存的改动会丢掉。' : ''}当前这版会存进历史。`)) return;
+  if (!(await ask({ title: '回滚角色卡', text: `回滚到 ${when(v.at)} 换下的「${v.name}」？${dirty.value ? '没保存的改动会丢掉。' : ''}当前这版会存进历史。`, confirm: '回滚' }))) return;
   await api('POST', `card-versions?id=${encodeURIComponent(editing.value)}&vid=${v.id}`);
   saved.value = JSON.stringify(form); // 不再提示没保存的改动
   await open(editing.value);
@@ -67,15 +69,11 @@ const save = guard(async () => {
   await load();
 });
 
-const file = ref(null);
 const cropSrc = ref(''); // 正在裁剪的图片地址，空串表示弹窗没开
 
 /** 选好文件后先打开裁剪弹窗，不直接上传。 */
-function pickAvatar() {
-  const f = file.value.files[0];
-
-  file.value.value = '';
-  if (f) cropSrc.value = URL.createObjectURL(f);
+function pickAvatar(f) {
+  cropSrc.value = URL.createObjectURL(f);
 }
 
 /** 关掉裁剪弹窗，释放本地图片占的内存。 */
@@ -95,15 +93,10 @@ const saveAvatar = guard(async (blob) => {
   toast('头像已更换');
 });
 
-const portraitFile = ref(null);
 const viewer = ref(null);
 
 /** 选好形象图直接上传，原图不裁不压。 */
-const savePortrait = guard(async () => {
-  const f = portraitFile.value.files[0];
-
-  portraitFile.value.value = '';
-  if (!f) return;
+const savePortrait = guard(async (f) => {
   await api('PUT', `portrait?id=${encodeURIComponent(editing.value)}`, await f.arrayBuffer(), true);
   await load();
   toast('形象图已更换');
@@ -111,7 +104,7 @@ const savePortrait = guard(async () => {
 </script>
 
 <template>
-  <h2>角色卡</h2>
+  <h2>角色卡 <span class="cap">Card</span></h2>
   <div v-if="!state.beings.length" class="panel empty"><p class="muted">先在「个体」页新建或导入一个个体。</p></div>
   <div v-else class="editor">
     <div class="panel">
@@ -123,12 +116,10 @@ const savePortrait = guard(async () => {
       </div>
       <div class="field">
         <label>头像</label>
-        <div class="row" style="gap: 14px; flex-wrap: wrap">
+        <div class="row" style="gap: 14px">
           <Avatar v-if="being" :being="being" />
-          <button class="btn" type="button" @click="file.click()">换头像</button>
-          <span class="muted">PNG、JPG、WebP，选好后裁剪</span>
+          <FilePicker style="flex: 1" accept="image/png,image/jpeg,image/webp" title="把头像拖到这里，选好后裁剪" formats="PNG · JPG · WebP" button="换头像" @file="pickAvatar" />
         </div>
-        <input ref="file" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="pickAvatar">
         <AvatarCrop v-if="cropSrc" :src="cropSrc" @done="saveAvatar" @close="closeCrop" />
       </div>
 
@@ -138,11 +129,7 @@ const savePortrait = guard(async () => {
         <button v-if="being?.portrait" class="portrait" type="button" aria-label="放大查看形象图" @click="viewer.showModal()">
           <img :src="avatarUrl(being, 'portrait')" alt="">
         </button>
-        <div class="row" style="gap: 14px; flex-wrap: wrap">
-          <button class="btn" type="button" @click="portraitFile.click()">换形象图</button>
-          <span class="muted">大图原样保存，点图放大</span>
-        </div>
-        <input ref="portraitFile" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="savePortrait">
+        <FilePicker accept="image/png,image/jpeg,image/webp" title="大图原样保存，点图放大" formats="PNG · JPG · WebP" button="换形象图" @file="savePortrait" />
         <dialog ref="viewer" class="viewer" aria-label="形象图" @click="viewer.close()">
           <img v-if="being?.portrait" :src="avatarUrl(being, 'portrait')" alt="">
         </dialog>

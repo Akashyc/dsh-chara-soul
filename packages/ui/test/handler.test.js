@@ -152,6 +152,14 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal((await call('PUT', '/api/settings', { envoyPreset: 'ptc' })).status, 200);
     assert.equal((await call('GET', '/api/settings')).data.envoyPreset, 'ptc');
     assert.equal((await call('PUT', '/api/settings', { envoyPreset: '../x' })).status, 400);
+    // 界面外观：默认深海蓝；只改给出的项；不合法的项回退默认
+    assert.deepEqual(s.ui, { accent: '#4C6AFC', theme: 'auto', backdrop: { stars: true, lattice: true, pulse: false } });
+    assert.equal((await call('PUT', '/api/settings', { ui: { accent: '#ff7a1a', theme: 'dark', backdrop: { stars: false, lattice: 'yes' } } })).status, 200);
+    const ui = (await call('GET', '/api/settings')).data;
+    assert.deepEqual(ui.ui, { accent: '#FF7A1A', theme: 'dark', backdrop: { stars: false, lattice: true, pulse: false } });
+    assert.equal(ui.envoyPreset, 'ptc', '只存外观时分身预设不变');
+    await call('PUT', '/api/settings', { ui: { accent: 'red', theme: 'pink' } });
+    assert.deepEqual((await call('GET', '/api/settings')).data.ui, { accent: '#4C6AFC', theme: 'auto', backdrop: { stars: true, lattice: true, pulse: false } });
     assert.match((await call('POST', '/api/home', { to: path.join(home, '..', '别处') })).data.error, /环境变量/);
     assert.equal((await call('DELETE', '/api/home')).status, 400);
     assert.equal((await call('POST', '/api/pick-folder?t=tk', undefined, {})).status, 403, '弹对话框也只认请求头');

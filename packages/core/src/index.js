@@ -14,6 +14,8 @@ import { dreamPrompt, checkDiary } from './memory/dream.js';
 import { KINDS, vividness, memoryText, kindOf, explicitRemember, memoryLine, memoryLines, endOfDay, splitKind } from './memory/points.js';
 
 const DAY = 86_400_000;
+// 界面外观的默认值：深海蓝、跟随系统、星空和连线开、节点脉动关
+const UI_DEFAULTS = { accent: '#4C6AFC', theme: 'auto', backdrop: { stars: true, lattice: true, pulse: false } };
 const mtime = (f) => (existsSync(f) ? statSync(f).mtimeMs : 0);
 const CARD_FIELDS = ['name', 'appearance', 'personality', 'speech', 'relationship', 'first_mes', 'mes_example'];
 const PROFILE_FIELDS = ['name', 'call_me', 'appearance', 'traits', 'likes', 'taboos'];
@@ -695,6 +697,31 @@ ${material}`;
     return id;
   };
 
+  /**
+   * 界面外观设置：存的或传来的值逐项校验，不合法的项回退默认并记日志（封锁风重构交接 4.4）。
+   * @param raw 对象或 JSON 字符串；null 时全是默认
+   */
+  function uiSettings(raw) {
+    let v = raw;
+    if (typeof v === 'string') {
+      try {
+        v = JSON.parse(v);
+      } catch {
+        v = null;
+      }
+    }
+    const src = v && typeof v === 'object' ? v : {};
+    const bd = src.backdrop && typeof src.backdrop === 'object' ? src.backdrop : {};
+    const out = {
+      accent: /^#[0-9a-f]{6}$/i.test(src.accent) ? src.accent.toUpperCase() : UI_DEFAULTS.accent,
+      theme: ['auto', 'light', 'dark'].includes(src.theme) ? src.theme : UI_DEFAULTS.theme,
+      backdrop: Object.fromEntries(Object.entries(UI_DEFAULTS.backdrop).map(([k, d]) => [k, typeof bd[k] === 'boolean' ? bd[k] : d])),
+    };
+    const bad = [src.accent !== undefined && out.accent !== String(src.accent).toUpperCase() && 'accent', src.theme !== undefined && out.theme !== src.theme && 'theme', ...Object.keys(UI_DEFAULTS.backdrop).filter((k) => bd[k] !== undefined && typeof bd[k] !== 'boolean')].filter(Boolean);
+    if (raw != null && bad.length) console.warn(`[chara-soul] 界面设置里这些项不合法，已回退默认：${bad.join('、')}`);
+    return out;
+  }
+
   /** 界面（packages/ui）用的读写：只碰角色卡、画像与个体状态，切换与导入仍走 command。 */
   /** 界面填的到期日（YYYY-MM-DD，个体所在时区）转成毫秒；空为 null，格式不对报错。 */
   function dueOf(life, due) {
@@ -808,11 +835,15 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
     global: () => ({ text: readGlobal() }),
     saveGlobal: ({ text } = {}) => writeText(globalFile(), typeof text === 'string' ? text : ''),
     /** 设置（005 号决定）：envoyPreset 是本体在自带预设（闲谈陪伴、全能女仆）下时，派分身用的预设。 */
-    settings: () => ({ envoyPreset: roster.getState('envoy_preset') ?? 'chara-soul-envoy' }), // 默认用插件自带的分身预设
-    saveSettings({ envoyPreset } = {}) {
-      const id = String(envoyPreset ?? '').trim();
-      if (!/^[\w.-]+$/.test(id)) throw new Error('预设 id 只能是字母、数字、点、横线、下划线');
-      roster.setState('envoy_preset', id);
+    settings: () => ({ envoyPreset: roster.getState('envoy_preset') ?? 'chara-soul-envoy', ui: uiSettings(roster.getState('ui')) }), // 默认用插件自带的分身预设
+    /** 只改给出的项：envoyPreset 分身预设；ui 界面外观（主题色、背景开关、明暗），存在服务端，换端口不丢。 */
+    saveSettings({ envoyPreset, ui } = {}) {
+      if (envoyPreset !== undefined) {
+        const id = String(envoyPreset ?? '').trim();
+        if (!/^[\w.-]+$/.test(id)) throw new Error('预设 id 只能是字母、数字、点、横线、下划线');
+        roster.setState('envoy_preset', id);
+      }
+      if (ui !== undefined) roster.setState('ui', JSON.stringify(uiSettings(ui)));
     },
     imageFile: (id, kind) => imageOf(known(id), imageKind(kind)),
     /** 换头像或形象图；导入时留下的 source.png 不动 */

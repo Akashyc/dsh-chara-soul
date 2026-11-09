@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import Slider from './ui/Slider.vue';
 
 defineProps({ src: { type: String, required: true } });
 const emit = defineEmits(['done', 'close']);
@@ -84,7 +85,7 @@ function key(e) {
 }
 
 /** 按取景框裁出正方形，导出 WebP（浏览器不支持时自动退回 PNG），交给父组件上传。 */
-function confirm() {
+function crop() {
   const canvas = document.createElement('canvas');
   const s = scale.value;
 
@@ -116,14 +117,14 @@ function confirm() {
     </div>
 
     <!-- 缩放 -->
-    <label class="crop-zoom">
-      缩放
-      <input type="range" min="1" max="4" step="0.01" :value="zoom" :disabled="!size" @input="setZoom(+$event.target.value)">
-    </label>
+    <div class="crop-zoom">
+      <span aria-hidden="true">缩放</span>
+      <Slider :model-value="zoom" :min="1" :max="4" label="缩放" :disabled="!size" @update:model-value="setZoom" />
+    </div>
 
     <!-- 操作区 -->
     <div class="actions">
-      <button class="btn primary" type="button" :disabled="!size" @click="confirm">用这张</button>
+      <button class="btn primary" type="button" :disabled="!size" @click="crop">用这张</button>
       <button class="btn" type="button" @click="dialog.close()">取消</button>
     </div>
   </dialog>

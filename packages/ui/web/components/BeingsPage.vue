@@ -1,7 +1,10 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
-import { state, api, load, use, sleep, STATUS, toast, guard, colorOf, ageText, seenText } from '../store.js';
+import { state, api, load, use, sleep, go, STATUS, toast, guard, colorOf, ageText, seenText } from '../store.js';
 import Avatar from './Avatar.vue';
+import TextField from './ui/TextField.vue';
+import FilePicker from './ui/FilePicker.vue';
+import RadioGroup from './ui/RadioGroup.vue';
 
 /* 牌堆：当前个体在最上面；换人时原来那张塞到最后一个可见位置，像把牌插回牌堆底 */
 let deck = [];
@@ -32,7 +35,7 @@ watch(
 const cards = computed(() => state.beings.filter((b) => shown.value.includes(b.id)));
 const pos = (b) => shown.value.indexOf(b.id);
 
-const click = guard(async (b) => (pos(b) === 0 ? (state.tab = 'card') : use(b)));
+const click = guard(async (b) => (pos(b) === 0 ? go('card') : use(b)));
 
 const newName = ref('');
 const create = guard(async () => {
@@ -44,10 +47,11 @@ const create = guard(async () => {
   await load();
 });
 
-const file = ref(null);
 const drag = ref(false);
 // 灵魂包里的个体或画像本机已有时，先停下来让用户选覆盖、跳过还是新建
 const pending = ref(null); // { file, conflicts }
+const choice = ref('覆盖');
+const CHOICES = [{ value: '覆盖', label: '覆盖本机的' }, { value: '跳过', label: '跳过' }, { value: '新建', label: '新建成新个体' }];
 const importFile = guard(async (f, conflict = '') => {
   if (!f) return;
   pending.value = null;
@@ -59,11 +63,6 @@ const importFile = guard(async (f, conflict = '') => {
   toast(r.text);
   await load();
 });
-function picked() {
-  const f = file.value.files[0];
-  file.value.value = '';
-  importFile(f);
-}
 function dropped(e) {
   drag.value = false;
   importFile(e.dataTransfer.files[0]);
@@ -71,9 +70,9 @@ function dropped(e) {
 </script>
 
 <template>
-  <h2>个体</h2>
+  <h2>个体 <span class="cap">Beings</span></h2>
   <div class="beings">
-    <div :class="['stage', { drag }]" aria-label="个体卡片，拖入角色卡文件即可导入" @dragover.prevent="drag = true" @dragleave="drag = false" @drop.prevent="dropped">
+    <div :class="['stack-area', { drag }]" aria-label="个体卡片，拖入角色卡文件即可导入" @dragover.prevent="drag = true" @dragleave="drag = false" @drop.prevent="dropped">
       <div v-if="cards.length" class="stack">
         <button
           v-for="b in cards"
@@ -111,21 +110,19 @@ function dropped(e) {
         <div class="field">
           <label for="newName">新建个体</label>
           <div class="row">
-            <input id="newName" v-model="newName" placeholder="名字" maxlength="40" @keydown.enter="create">
+            <TextField id="newName" v-model="newName" placeholder="名字" maxlength="40" @keydown.enter="create" />
             <button class="btn primary" type="button" @click="create">新建</button>
           </div>
         </div>
         <div class="field" style="margin-bottom: 0">
           <label>导入角色卡</label>
-          <button class="btn" type="button" @click="file.click()">选择文件</button>
-          <input ref="file" type="file" accept=".png,.json,.yaml,.yml,.soul" hidden @change="picked">
+          <FilePicker accept=".png,.json,.yaml,.yml,.soul" title="把角色卡拖到这里" formats="PNG · JSON · YAML · .soul" @file="importFile" />
           <span class="muted">支持本项目的 YAML、SillyTavern 的 JSON / PNG，以及迁移用的灵魂包 .soul；电脑上也可以直接拖到卡片上。</span>
           <div v-if="pending" class="conflict" role="alert">
             <span>包里的{{ pending.conflicts.join('、') }}本机已有：</span>
-            <div class="row">
-              <button class="btn" type="button" @click="importFile(pending.file, '覆盖')">覆盖本机的</button>
-              <button class="btn" type="button" @click="importFile(pending.file, '跳过')">跳过</button>
-              <button class="btn" type="button" @click="importFile(pending.file, '新建')">新建成新个体</button>
+            <RadioGroup v-model="choice" :options="CHOICES" label="本机已有时怎么办" />
+            <div class="actions">
+              <button class="btn primary" type="button" @click="importFile(pending.file, choice)">导入</button>
               <button class="link" type="button" @click="pending = null">取消</button>
             </div>
             <span class="muted">对这次所有重复的都生效；画像只有一份，选新建等于跳过。</span>
@@ -139,12 +136,12 @@ function dropped(e) {
         </div>
         <div class="list">
           <div v-for="b in state.beings" :key="b.id" class="being-row">
-            <button :class="['chip', { on: b.current, asleep: b.status !== 'awake' }]" type="button" @click="guard(use)(b)">
+            <button :class="['being-chip', { on: b.current, asleep: b.status !== 'awake' }]" type="button" @click="guard(use)(b)">
               <Avatar :being="b" size="sm" />
               <span><b>{{ b.name }}</b><br><span class="muted">{{ b.status !== 'awake' ? STATUS[b.status] : `${ageText(b)} · ${seenText(b)}` }}</span></span>
             </button>
             <button v-if="b.status === 'awake'" class="link" type="button" :aria-label="`让 ${b.name} 休眠`" @click="guard(sleep)(b)">休眠</button>
-            <button v-if="b.status === 'awake' || b.status === 'dormant'" class="link bad" type="button" :aria-label="`放生 ${b.name}`" @click="state.releasing = b.id; state.tab = 'release'">放生</button>
+            <button v-if="b.status === 'awake' || b.status === 'dormant'" class="link bad" type="button" :aria-label="`放生 ${b.name}`" @click="state.releasing = b.id; go('release')">放生</button>
           </div>
         </div>
       </div>

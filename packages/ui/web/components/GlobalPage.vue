@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watchEffect } from 'vue';
 import { state, api, toast, guard } from '../store.js';
+import TextArea from './ui/TextArea.vue';
 
 const text = ref('');
 const saved = ref(''); // 上次读入或保存时的内容，用来判断有没有没保存的改动
@@ -19,13 +20,12 @@ const save = guard(async () => {
 </script>
 
 <template>
-  <h2>全局提示词</h2>
+  <h2>全局提示词 <span class="cap">Global</span></h2>
   <div class="panel" style="max-width: 760px">
     <p class="muted" style="margin-top: 0">对每个个体都生效。排在人设之后、底线之前：能压过人设里的同类要求，但越不过底线。不占本性预算，也不会被截断，写短些更好。</p>
     <div class="field">
       <label for="f-global">内容</label>
-      <textarea id="f-global" v-model="text" rows="12" placeholder="例如：回复不要用 Markdown；动作描写放在括号里。"></textarea>
-      <span class="muted">{{ [...text.trim()].length }} 字</span>
+      <TextArea id="f-global" v-model="text" rows="12" counter placeholder="例如：回复不要用 Markdown；动作描写放在括号里。" />
     </div>
     <div class="actions save-bar">
       <button class="btn primary" type="button" :disabled="!dirty" @click="save">保存</button>

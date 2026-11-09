@@ -4,6 +4,8 @@ import { state, api, load, toast, guard, avatarUrl } from '../store.js';
 import AvatarCrop from './AvatarCrop.vue';
 import Fields from './Fields.vue';
 import Select from './Select.vue';
+import FilePicker from './ui/FilePicker.vue';
+import { ask } from './ui/dialog.js';
 
 const PROFILE = [
   ['name', '你的名字', '', 'input'],
@@ -18,7 +20,6 @@ const saved = ref(JSON.stringify(form)); // 上次读入或保存时的快照，
 const dirty = computed(() => JSON.stringify(form) !== saved.value);
 watchEffect(() => (state.dirty = dirty.value)); // 交给 App 在切页签、关页面前提醒
 
-const file = ref(null);
 const cropSrc = ref(''); // 正在裁剪的图片地址，空串表示弹窗没开
 const avatarV = ref(Date.now()); // 换图后改它，让 img 重新取图
 const hasAvatar = ref(true); // 取图 404 时退回名字首字
@@ -40,10 +41,10 @@ const read = guard(async () => {
 read();
 
 /** 换画像前，有没保存的改动要先确认。 */
-const leave = () => !dirty.value || confirm('画像有改动还没保存，继续会丢掉这些改动，继续吗？');
+const leave = async () => !dirty.value || ask({ title: '画像没保存', text: '画像有改动还没保存，继续会丢掉这些改动，继续吗？', confirm: '继续' });
 
 const switchTo = guard(async (pid) => {
-  if (pid === profiles.value.current || !leave()) return;
+  if (pid === profiles.value.current || !(await leave())) return;
   await api('PUT', `profiles?pid=${encodeURIComponent(pid)}`);
   await read();
   await load();
@@ -51,7 +52,7 @@ const switchTo = guard(async (pid) => {
 });
 
 const addProfile = guard(async () => {
-  if (!leave()) return;
+  if (!(await leave())) return;
   await api('POST', 'profiles');
   await read();
   await load();
@@ -61,7 +62,7 @@ const addProfile = guard(async () => {
 /** 删掉当前这份：先切到另一份再删，正在用的不能删。 */
 const removeProfile = guard(async () => {
   const other = profiles.value.list.find((p) => p.id !== profiles.value.current);
-  if (!other || !confirm('删掉当前这份画像（连同它的头像），换到另一份。删了不能恢复，继续吗？')) return;
+  if (!other || !(await ask({ title: '删除这份画像', text: '删掉当前这份画像（连同它的头像），换到另一份。删了不能恢复，继续吗？', confirm: '删除', danger: true }))) return;
   const cur = profiles.value.current;
   await api('PUT', `profiles?pid=${encodeURIComponent(other.id)}`);
   await api('DELETE', `profiles?pid=${encodeURIComponent(cur)}`);
@@ -79,11 +80,8 @@ const save = guard(async () => {
 });
 
 /** 选好文件后先打开裁剪弹窗，不直接上传。 */
-function pickAvatar() {
-  const f = file.value.files[0];
-
-  file.value.value = '';
-  if (f) cropSrc.value = URL.createObjectURL(f);
+function pickAvatar(f) {
+  cropSrc.value = URL.createObjectURL(f);
 }
 
 /** 关掉裁剪弹窗，释放本地图片占的内存。 */
@@ -106,7 +104,7 @@ const saveAvatar = guard(async (blob) => {
 </script>
 
 <template>
-  <h2>用户画像</h2>
+  <h2>用户画像 <span class="cap">Profile</span></h2>
   <div class="panel" style="max-width: 760px">
     <p class="muted" style="margin-top: 0">所有个体共享。写你希望它们知道的自己；名字、称呼、忌讳会进入本性；和每个个体的关系写在各自的角色卡里。</p>
 
@@ -116,7 +114,7 @@ const saveAvatar = guard(async (blob) => {
       <div class="row" style="gap: 10px; flex-wrap: wrap">
         <Select id="profile-pick" :model-value="profiles.current" :options="profileOptions" @update:model-value="switchTo" />
         <button class="btn" type="button" @click="addProfile">新建一份</button>
-        <button v-if="profiles.list.length > 1" class="btn" type="button" @click="removeProfile">删除这份</button>
+        <button v-if="profiles.list.length > 1" class="btn danger" type="button" @click="removeProfile">删除这份</button>
       </div>
       <span class="muted">不同场合想用不同身份时用；新建会复制当前这份</span>
     </div>
@@ -124,13 +122,11 @@ const saveAvatar = guard(async (blob) => {
     <!-- 头像 -->
     <div class="field">
       <label>头像</label>
-      <div class="row" style="gap: 14px; flex-wrap: wrap">
-        <img v-if="hasAvatar" class="avatar" alt="" :src="avatarSrc" style="--c: var(--pink)" @error="hasAvatar = false">
-        <span v-else class="avatar mono" aria-hidden="true" style="--c: var(--pink)">{{ [...form.name][0] ?? '我' }}</span>
-        <button class="btn" type="button" @click="file.click()">换头像</button>
-        <span class="muted">PNG、JPG、WebP，选好后裁剪</span>
+      <div class="row" style="gap: 14px">
+        <img v-if="hasAvatar" class="avatar" alt="" :src="avatarSrc" style="--c: var(--ac)" @error="hasAvatar = false">
+        <span v-else class="avatar mono" aria-hidden="true" style="--c: var(--ac)">{{ [...form.name][0] ?? '我' }}</span>
+        <FilePicker style="flex: 1" accept="image/png,image/jpeg,image/webp" title="把头像拖到这里，选好后裁剪" formats="PNG · JPG · WebP" button="换头像" @file="pickAvatar" />
       </div>
-      <input ref="file" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="pickAvatar">
       <AvatarCrop v-if="cropSrc" :src="cropSrc" @done="saveAvatar" @close="closeCrop" />
     </div>
     <Fields v-model="form" :spec="PROFILE" />
