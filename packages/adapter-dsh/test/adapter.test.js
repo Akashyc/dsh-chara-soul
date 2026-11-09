@@ -152,6 +152,12 @@ test('分身：chara_envoy 派出带底线的简报，结算时把任务与汇�
     services.subagents = { startActivation: async (o) => (sent.push(o), { childId: 'c-1' }) };
     const main = { id: 'session-1', header: { delegationDepth: 0 } };
     emit(main, 'user/message', userMsg('帮我修个 bug', 'r1'));
+    const remember = tools.find((t) => t.name === 'chara_remember');
+    assert.match(await remember.execute({ content: '幸运数字是 42' }, exec), /^已记住 #1/);
+    assert.match(await remember.execute({ content: '幸运数字是 6', replaces: '#1' }, exec), /取代了 #1/);
+    assert.match(await remember.execute({ content: 'x' }, { agent: { session: { id: 'c-0' } } }), /分身不记/);
+    assert.match(await remember.execute({ content: '' }, exec), /^没有记下/);
+    assert.match(core.moment(), /#2 事实：幸运数字是 6/);
     assert.match(await envoy.execute({ task: '再派一个' }, { agent: { session: { id: 'c-0' } } }), /你自己就是分身/, '分身不能再派分身');
     assert.match(await envoy.execute({ task: '修复 a.js 的空指针', acceptance: '测试通过', context: 'Boss 只用 npm' }, exec), /c-1 已出发/);
     const brief = sent[0].request.prompt[0].text;

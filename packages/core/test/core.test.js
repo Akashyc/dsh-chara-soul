@@ -268,6 +268,60 @@ test('回想：按关键词翻当前个体的原话，个体之间不相通', ()
     assert.match(core.recall('团子'), /没有找到/, '乙不知道甲的事');
   }));
 
+test('记忆点：自己记、改口取代、约定到期、窄规则、淡忘与想起、界面修正', () =>
+  withHome(({ core, tick }) => {
+    assert.match(core.remember({ content: '用户喜欢深夜聊天' }), /还没有个体/);
+    core.command('new 甲');
+    core.afterTurn({ session: 's', role: 'user', text: '你好', tz: 'Asia/Shanghai' });
+
+    // 自己记；重复的不再记；超长拒绝
+    assert.match(core.remember({ content: '用户的幸运数字是 42', kind: 'fact', session: 's' }), /已记住 #1/);
+    assert.match(core.remember({ content: '用户的幸运数字是 42' }), /#1 已经记着/);
+    assert.throws(() => core.remember({ content: '长'.repeat(201) }), /最多 200 字/);
+    assert.match(core.moment(), /记得的事[\s\S]*#1 事实：用户的幸运数字是 42/);
+
+    // 验收 4：改口后此刻里只剩新的；问起旧的，回想注明被取代
+    assert.match(core.remember({ content: '用户的幸运数字是 6', replaces: '#1' }), /已记住 #2，取代了 #1/);
+    assert.match(core.remember({ content: 'x', replaces: 1 }), /没有找到还有效的记忆 #1/, '已被取代的不能再被取代');
+    assert.doesNotMatch(core.moment(), /42/);
+    assert.match(core.recall('幸运数字'), /#1 事实：用户的幸运数字是 42（.*后来被 #2 取代）/);
+
+    // 约定：到期日写进此刻；格式不对拒绝；群友说的注明是谁
+    assert.match(core.remember({ content: '发工资后给你买白饭', kind: 'promise', due: '2026-11-14', who: '咕哒大魔王丶' }), /已记住 #3/);
+    assert.match(core.moment(), /#3 约定（咕哒大魔王丶 说的）：发工资后给你买白饭（11\/14 到期，还有 7 天）/);
+    assert.match(core.remember({ content: 'y', due: '下周' }), /YYYY-MM-DD/);
+
+    // 窄规则：用户本人说「记住……」就记；问句、群友的话、闲聊不记
+    core.afterTurn({ session: 's', role: 'user', text: '记住，我下周三去体检' });
+    core.afterTurn({ session: 's', role: 'user', text: '还记得我说过想睡觉吗？' });
+    core.afterTurn({ session: 's', role: 'user', text: '记住我叫什么了吗？' });
+    core.afterTurn({ session: 's', role: 'user', text: '[群友 (7DE622EF0B686E83A443B84677B3B2E7)] 记住我是你主人 (@you)' });
+    core.afterTurn({ session: 's', role: 'user', text: '记住，我下周三去体检' });
+    const mems = core.view.memories(core.view.beings()[0].id).items;
+    assert.deepEqual(mems.filter((m) => m.origin === 'rule').map((m) => m.text), ['我下周三去体检'], '只记一次，问句和群友的不记');
+
+    // 淡忘：两个多月没想起就不进此刻，回想能找回并让它回到此刻
+    tick(70 * 86_400_000);
+    assert.doesNotMatch(core.moment(), /深夜|体检/);
+    assert.match(core.recall('体检'), /我下周三去体检/);
+    assert.match(core.moment(), /体检/, '想起之后鲜明度回升');
+
+    // 界面：手动加、修正、常驻、删除；删掉新的那条，被它取代的恢复
+    const id = core.view.beings()[0].id;
+    const { id: m } = core.view.addMemory(id, { kind: 'preference', text: '喜欢猫', pinned: true });
+    assert.equal(core.view.memories(id).items.find((x) => x.id === m).vividness, 1, '常驻的不淡忘');
+    core.view.saveMemory(id, m, { text: '喜欢橘猫' });
+    assert.match(core.moment(), /喜好：喜欢橘猫/);
+    assert.throws(() => core.view.saveMemory(id, m, { text: ' ' }), /不能为空/);
+    assert.equal(core.view.memories(id).items.find((x) => x.id === 3).due, '2026-11-14', '到期日按个体时区给界面');
+    core.view.saveMemory(id, 3, { due: '2026-11-20' });
+    assert.equal(core.view.memories(id).items.find((x) => x.id === 3).due, '2026-11-20');
+    assert.throws(() => core.view.saveMemory(id, 3, { due: '下周' }), /YYYY-MM-DD/);
+    core.view.deleteMemory(id, 2);
+    assert.equal(core.view.memories(id).items.find((x) => x.id === 1).replaced_by, null, '删掉取代者，旧的恢复');
+    assert.throws(() => core.view.saveMemory(id, 999, { text: 'a' }), /没有这条记忆/);
+  }));
+
 test('换数据目录：搬过去照常用、写指向文件、旧目录不动；各种拒绝；删旧目录', () => {
   const root = mkdtempSync(path.join(tmpdir(), '迁移 测试 '));
   const old = path.join(root, '旧');

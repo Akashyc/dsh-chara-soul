@@ -22,7 +22,26 @@ const STEPS = [
      at INTEGER NOT NULL,
      host TEXT NOT NULL
    );`,
+  // 记忆点（M3）：个体用 chara_remember 自己记、窄规则记「记住……」、用户在界面里手动加；用户可改可删
+  (s) => {
+    s.db.exec(`CREATE TABLE memories (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL,
+      text TEXT NOT NULL,
+      speaker TEXT NOT NULL DEFAULT '用户',
+      due INTEGER,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      origin TEXT NOT NULL CHECK (origin IN ('model', 'rule', 'user')),
+      session TEXT,
+      created INTEGER NOT NULL,
+      touched INTEGER NOT NULL,
+      replaced_by INTEGER
+    );`);
+    ftsIndex(s, 'memories', ['text']);
+  },
 ];
+
+const MEMORY_FIELDS = ['kind', 'text', 'speaker', 'due', 'pinned', 'replaced_by'];
 
 export function openLife(dir) {
   const store = openDb(path.join(dir, 'life.db'));
@@ -46,6 +65,24 @@ export function openLife(dir) {
     /** 按关键词翻原话（M3 之前的简单回想）。返回最相关的 limit 条，按时间先后排。 */
     searchTurns: (query, limit = 8) => search(store, 'turns', 'text', query, limit).sort((a, b) => a.at - b.at),
     turnCount: () => db.prepare('SELECT count(*) n FROM turns').get().n,
+    /** 新记一条记忆点，返回 id。 */
+    addMemory: ({ kind, text, speaker = '用户', due = null, pinned = 0, origin, session = null, at }) =>
+      Number(db.prepare('INSERT INTO memories (kind, text, speaker, due, pinned, origin, session, created, touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(kind, text, speaker, due, pinned ? 1 : 0, origin, session, at, at).lastInsertRowid),
+    memories: () => db.prepare('SELECT * FROM memories ORDER BY id').all(),
+    memory: (id) => db.prepare('SELECT * FROM memories WHERE id = ?').get(id) ?? null,
+    /** 只改给出的字段。 */
+    updateMemory(id, fields) {
+      const keys = MEMORY_FIELDS.filter((k) => k in fields);
+      if (keys.length) db.prepare(`UPDATE memories SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), id);
+    },
+    /** 删掉一条；被它取代的那条恢复成没被取代，免得一起消失。 */
+    deleteMemory(id) {
+      db.prepare('UPDATE memories SET replaced_by = NULL WHERE replaced_by = ?').run(id);
+      db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+    },
+    /** 想起过：更新最近一次被用到的时刻，鲜明度回升。 */
+    touchMemories: (ids, at) => ids.forEach((id) => db.prepare('UPDATE memories SET touched = ? WHERE id = ?').run(at, id)),
+    searchMemories: (query, limit = 8) => search(store, 'memories', 'text', query, limit),
     close: () => db.close(),
   };
 }

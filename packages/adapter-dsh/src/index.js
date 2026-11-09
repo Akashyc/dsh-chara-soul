@@ -202,16 +202,48 @@ export function apply(ctx, _config, deps = {}) {
     );
   });
 
-  // 回想（M3 之前的简单版）：按关键词翻原话
+  // 回想：按关键词先翻记忆点，再翻原话
   ctx.inject(['tools'], (c) => {
     c.effect(() =>
       c.tools.register(
         defineTool({
           name: 'chara_recall',
-          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你们的原话。',
+          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你记下的事和你们的原话。',
           parameters: { query: { type: 'string', required: true, description: '关键词，越具体越好，如「猫的名字」写成「猫」' } },
           output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
           execute: async (args) => core.recall(args.query),
+        }),
+      ),
+    );
+  });
+
+  // 记忆点：个体自己判断该记什么（2026-11-09 用户定），分身不记，写进汇报由本体决定
+  ctx.inject(['tools'], (c) => {
+    c.effect(() =>
+      c.tools.register(
+        defineTool({
+          name: 'chara_remember',
+          description: '把值得长久记住的事记下来：用户的喜好、事实、约定、改口、重要的经历和决定。闲聊、指令、测试不用记；此刻「记得的事」里已有的不要重复记。',
+          // content 放第一个：flash 模型偶尔把后面的参数吞进前一个字符串里，内容在最前面就不会丢（M10 实测）
+          parameters: {
+            content: { type: 'string', required: true, description: '要记的内容，一句话写清，200 字以内，如「用户的幸运数字是 6」' },
+            kind: { type: 'string', description: 'fact 事实 | preference 喜好 | promise 约定 | event 事件 | decision 决定 | feeling 感受 | rule 规矩 | lesson 体会；不填当事实' },
+            replaces: { type: 'string', description: '改口时填被取代的旧记忆编号，如 12；不是改口就不填' },
+            due: { type: 'string', description: '约定的到期日，YYYY-MM-DD；没有就不填' },
+            who: { type: 'string', description: '说这话的人：用户本人不填；QQ 群里别人说的写对方昵称' },
+          },
+          output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
+          async execute(args, exec) {
+            const sid = String(exec?.agent?.session?.id ?? '');
+            if (exec?.agent && !mainSessions.has(sid)) return '分身不记记忆点；要紧的写进汇报，由本体决定记不记。';
+            try {
+              const r = core.remember({ ...args, session: sid || null });
+              sync();
+              return r;
+            } catch (e) {
+              return `没有记下：${e.message}`;
+            }
+          },
         }),
       ),
     );

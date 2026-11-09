@@ -69,6 +69,7 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
       if (is('GET', '/api/card')) return send(200, core.view.card(q('id')));
       if (is('GET', '/api/profile')) return send(200, core.view.profile());
       if (is('GET', '/api/global')) return send(200, core.view.global());
+      if (is('GET', '/api/memories')) return send(200, core.view.memories(q('id')));
       if (is('GET', '/api/settings')) return send(200, { ...core.view.settings(), presets: await presets().catch(() => null), home: core.homeInfo() });
       if (!headerOk) return send(403, { error: '写操作需要请求头令牌' });
 
@@ -78,6 +79,9 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
       if (image && req.method === 'PUT') return core.view.saveImage(q('id'), image, await readBody(req)), send(200, { ok: true });
       if (is('PUT', '/api/profile')) return core.view.saveProfile(await json()), onChange(), send(200, { ok: true });
       if (is('PUT', '/api/global')) return core.view.saveGlobal(await json()), onChange(), send(200, { ok: true });
+      if (is('POST', '/api/memories')) return send(200, core.view.addMemory(q('id'), await json()));
+      if (is('PUT', '/api/memories')) return core.view.saveMemory(q('id'), q('mid'), await json()), send(200, { ok: true });
+      if (is('DELETE', '/api/memories')) return core.view.deleteMemory(q('id'), q('mid')), send(200, { ok: true });
       if (is('PUT', '/api/settings')) return core.view.saveSettings(await json()), send(200, { ok: true });
       // 换数据目录之后本性要从新位置读，所以也调 onChange
       if (is('POST', '/api/home')) return send(200, core.moveHome((await json()).to)), onChange();

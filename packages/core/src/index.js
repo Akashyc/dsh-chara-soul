@@ -9,6 +9,7 @@ import { readTavernJson, fromTavern } from './card/tavern.js';
 import { buildNature, buildBrief } from './nature/index.js';
 import { floor5, zone, timeLines, daysBetween, relative } from './chrono/index.js';
 import { openLife } from './memory/life.js';
+import { KINDS, vividness, memoryText, kindOf, explicitRemember, memoryLine, memoryLines, endOfDay } from './memory/points.js';
 
 const mtime = (f) => (existsSync(f) ? statSync(f).mtimeMs : 0);
 const CARD_FIELDS = ['name', 'appearance', 'personality', 'speech', 'relationship', 'first_mes', 'mes_example'];
@@ -84,7 +85,10 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     if (!c) return '';
     const t = floor5(now());
     if (wake && c.life.meta('born_at') == null) c.life.setMeta('born_at', t);
-    const lines = timeLines({ now: t, born: c.life.meta('born_at'), prev: c.life.meta('prev_user_at'), last: c.life.meta('last_user_at'), tz: zone(c.life.meta('tz')) });
+    const tz = zone(c.life.meta('tz'));
+    const lines = timeLines({ now: t, born: c.life.meta('born_at'), prev: c.life.meta('prev_user_at'), last: c.life.meta('last_user_at'), tz });
+    const mem = memoryLines(c.life.memories(), t, tz);
+    if (mem.length) lines.push('', '记得的事（#编号是 chara_remember 取代旧记忆时用的；更早、淡了的用 chara_recall 找）：', ...mem);
     return lines.join('\n');
   }
 
@@ -97,10 +101,41 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     c.life.setMeta('prev_user_at', c.life.meta('last_user_at'));
     c.life.setMeta('last_user_at', at);
     if (tz) c.life.setMeta('tz', tz);
+    // 窄规则：用户明说「记住……」时一定记下，补个体漏记；同样的内容已经记着就不重复
+    const body = explicitRemember(text);
+    if (body && !c.life.memories().some((m) => m.replaced_by == null && m.text === body)) c.life.addMemory({ kind: 'fact', text: body, origin: 'rule', session, at });
   }
 
   /**
-   * 回想：按关键词翻当前个体的原话。shortcut: 只搜原话、不提取记忆点，M3 记忆点上线后改为先查记忆点。
+   * 个体自己记一条（chara_remember 工具）。
+   * @param content 要记的内容，200 字以内
+   * @param kind 类型，见 KINDS；认不出时当事实
+   * @param replaces 被这条取代的旧记忆编号（改口时用）
+   * @param due 约定的到期日 YYYY-MM-DD
+   * @param who 说这话的人：用户本人留空，QQ 群友写昵称
+   * @returns 给模型看的结果
+   */
+  function remember({ content, kind, replaces, due, who, session = null } = {}) {
+    const c = current();
+    if (!c) return '还没有个体，没有记下。';
+    const text = memoryText(content);
+    const hasOld = replaces != null && String(replaces).trim() !== '';
+    const old = hasOld ? c.life.memory(Number(String(replaces).trim().replace(/^#/, ''))) : null;
+    if (hasOld && (!old || old.replaced_by != null)) return `没有找到还有效的记忆 #${replaces}，没有记下。不是改口就不要填 replaces。`;
+    let dueAt = null;
+    if (due && String(due).trim()) {
+      dueAt = endOfDay(due, zone(c.life.meta('tz')));
+      if (Number.isNaN(dueAt)) return `到期日要写成 YYYY-MM-DD，收到的是「${due}」，没有记下。`;
+    }
+    const dup = c.life.memories().find((m) => m.replaced_by == null && m.text === text);
+    if (dup && !old) return `#${dup.id} 已经记着这件事了。`;
+    const id = c.life.addMemory({ kind: kindOf(kind), text, speaker: String(who ?? '').trim() || '用户', due: dueAt, origin: 'model', session, at: now() });
+    if (old) c.life.updateMemory(old.id, { replaced_by: id });
+    return `已记住 #${id}${old ? `，取代了 #${old.id}` : ''}。`;
+  }
+
+  /**
+   * 回想：先查记忆点（被取代的也列出来，注明后来被哪条取代），再按关键词翻原话；查到的记忆点鲜明度回升。
    * @param query 关键词，不足三个字时退化为逐行匹配
    * @returns 每条一行「时间 谁：原话」，太长的截断；没有个体或没找到时给出说明
    */
@@ -111,10 +146,15 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     if (!q) return '要回想什么？给一个关键词。';
     const tz = zone(c.life.meta('tz'));
     const when = new Intl.DateTimeFormat('zh-CN', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    const mems = c.life.searchMemories(q);
     const rows = c.life.searchTurns(q);
-    if (!rows.length) return `原话里没有找到「${q}」。`;
+    if (!mems.length && !rows.length) return `记忆和原话里都没有找到「${q}」。`;
+    c.life.touchMemories(mems.map((m) => m.id), now());
     const cut = (t) => ([...t].length > 200 ? `${[...t].slice(0, 200).join('')}…` : t);
-    return rows.map((r) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${cut(r.text.replace(/\s+/g, ' '))}`).join('\n');
+    const out = [];
+    if (mems.length) out.push('记得的：', ...mems.map((m) => `${memoryLine(m, now(), tz)}（${when.format(m.created)} 记下${m.replaced_by != null ? `，后来被 #${m.replaced_by} 取代` : ''}）`));
+    if (rows.length) out.push(...(mems.length ? ['', '原话：'] : []), ...rows.map((r) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${cut(r.text.replace(/\s+/g, ' '))}`));
+    return out.join('\n');
   }
 
   /** 分身的简报。没有个体或没有任务时返回空串。 */
@@ -217,6 +257,14 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   };
 
   /** 界面（packages/ui）用的读写：只碰角色卡、画像与个体状态，切换与导入仍走 command。 */
+  /** 界面填的到期日（YYYY-MM-DD，个体所在时区）转成毫秒；空为 null，格式不对报错。 */
+  function dueOf(life, due) {
+    if (!due) return null;
+    const t = endOfDay(due, zone(life.meta('tz')));
+    if (Number.isNaN(t)) throw new Error('到期日要写成 YYYY-MM-DD');
+    return t;
+  }
+
   const view = {
     beings() {
       const cur = roster.current()?.id;
@@ -280,6 +328,32 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
       for (const f of imageNames(imageKind(kind))) rmSync(path.join(beingDir(known(id)), f), { force: true });
       writeFileSync(path.join(beingDir(id), `${kind}.${ext}`), buf);
     },
+    /** 记忆页：一个个体的全部记忆点（含被取代的），带鲜明度。 */
+    memories(id) {
+      const life = being(known(id)).life;
+      const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: zone(life.meta('tz')) }); // en-CA 的日期就是 YYYY-MM-DD
+      return { kinds: KINDS, items: life.memories().map((m) => ({ ...m, pinned: !!m.pinned, vividness: vividness(m, now()), due: m.due == null ? '' : ymd.format(m.due) })) };
+    },
+    /** 手动加一条。fields：kind、text、speaker、due（YYYY-MM-DD 或空）、pinned。 */
+    addMemory(id, fields = {}) {
+      const life = being(known(id)).life;
+      return { id: life.addMemory({ kind: kindOf(fields.kind), text: memoryText(fields.text), speaker: String(fields.speaker ?? '').trim() || '用户', due: dueOf(life, fields.due), pinned: !!fields.pinned, origin: 'user', at: now() }) };
+    },
+    /** 修正一条：只改给出的字段；改了内容也算想起过。replaced_by 只能清空（撤销取代）。 */
+    saveMemory(id, mid, fields = {}) {
+      const life = being(known(id)).life;
+      if (!life.memory(Number(mid))) throw new Error(`没有这条记忆：#${mid}`);
+      const f = {};
+      if ('kind' in fields) f.kind = kindOf(fields.kind);
+      if ('text' in fields) f.text = memoryText(fields.text);
+      if ('speaker' in fields) f.speaker = String(fields.speaker ?? '').trim() || '用户';
+      if ('due' in fields) f.due = dueOf(life, fields.due);
+      if ('pinned' in fields) f.pinned = fields.pinned ? 1 : 0;
+      if ('replaced_by' in fields && fields.replaced_by == null) f.replaced_by = null;
+      life.updateMemory(Number(mid), f);
+      if ('text' in f) life.touchMemories([Number(mid)], now());
+    },
+    deleteMemory: (id, mid) => being(known(id)).life.deleteMemory(Number(mid)),
     userAvatarFile: () => userAvatars().find((f) => existsSync(f)) ?? null,
     /** 换用户头像（画像页），换格式时删掉旧文件 */
     saveUserAvatar(buf) {
@@ -396,7 +470,7 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
   } catch {} // 卡或画像读不了时不搬，不影响启动；本性那边会报出具体错误
 
   return {
-    nature, moment, afterTurn, recall, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
+    nature, moment, afterTurn, remember, recall, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
     get home() {
       return home;
     },

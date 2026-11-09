@@ -98,6 +98,19 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.match((await call('GET', '/api/state')).data.show, /天音/);
     assert.ok(changes >= 5);
 
+    // 记忆：看、加、改、常驻、删；写操作只认请求头
+    const mem = (q = '') => `/api/memories?id=${tian.id}${q}`;
+    assert.deepEqual((await call('GET', mem())).data.items, []);
+    assert.equal((await call('POST', mem() + '&t=tk', { text: 'x' }, {})).status, 403);
+    const { id: mid } = (await call('POST', mem(), { kind: 'preference', text: '喜欢深夜聊天' })).data;
+    assert.equal((await call('POST', mem(), { text: '' })).status, 400, '空内容不收');
+    assert.equal((await call('PUT', mem(`&mid=${mid}`), { text: '喜欢凌晨聊天', pinned: true })).status, 200);
+    const [m] = (await call('GET', mem())).data.items;
+    assert.deepEqual([m.text, m.kind, m.pinned, m.vividness, m.origin], ['喜欢凌晨聊天', 'preference', true, 1, 'user']);
+    assert.equal((await call('PUT', mem('&mid=999'), { text: 'x' })).status, 400);
+    assert.equal((await call('DELETE', mem(`&mid=${mid}`))).status, 200);
+    assert.deepEqual((await call('GET', mem())).data.items, []);
+
     const s = (await call('GET', '/api/settings')).data;
     assert.equal(s.envoyPreset, 'chara-soul-envoy');
     assert.equal(s.presets, null, '宿主列不出预设时，设置页不显示分身预设');
