@@ -10,6 +10,7 @@ import TextArea from './ui/TextArea.vue';
 import DatePicker from './ui/DatePicker.vue';
 import Checkbox from './ui/Checkbox.vue';
 import Segmented from './ui/Segmented.vue';
+import Modal from './ui/Modal.vue';
 import { ask } from './ui/dialog.js';
 
 const mode = ref('points'); // points 记忆点 | diary 日记
@@ -61,9 +62,11 @@ const replacedCount = computed(() => items.value.filter((m) => m.replaced_by != 
 const kindCount = (k) => items.value.filter((m) => m.replaced_by == null && (!k || m.kind === k)).length;
 const date = (t) => new Date(t).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
 
+const adding = ref(false); // 「记一条」弹窗；关掉不清空，误关了再开还在
 const add = guard(async () => {
   const { id } = await api('POST', q(), { ...draft });
   Object.assign(draft, blank());
+  adding.value = false;
   await reload();
   toast(`已记下 #${id}，下一轮生效`);
 });
@@ -108,28 +111,8 @@ const remove = guard(async (m) => {
       <p v-if="mode === 'diary'" class="muted" style="margin: 0; line-height: 1.7">它每天写一篇日记，每句后面的编号指回当时的原话或记忆点，点开能看。新的一天第一次聊完后，会补写前几天还没写的；也可以在右边选一天现在就写，或者重写某一篇（在 DSH 里输入 /chara dream 也行）。</p>
       <template v-else>
       <b>加一条</b>
-      <p class="muted" style="margin-top: 4px">它漏记、记错的，在这里补上或改掉。一条一件事，200 字以内。</p>
-      <div class="field">
-        <label for="mem-text">内容</label>
-        <TextArea id="mem-text" v-model="draft.text" rows="3" maxlength="200" counter placeholder="例如：用户的幸运数字是 6" />
-      </div>
-      <div class="field">
-        <label for="mem-kind">类型</label>
-        <Select id="mem-kind" v-model="draft.kind" :options="kindOptions" />
-      </div>
-      <div class="field">
-        <label for="mem-speaker">谁说的</label>
-        <TextField id="mem-speaker" v-model="draft.speaker" placeholder="你本人就留空；群里别人说的写昵称" />
-      </div>
-      <div class="field">
-        <label for="mem-due">到期日</label>
-        <DatePicker id="mem-due" v-model="draft.due" placeholder="不设到期日" />
-        <span class="muted">约定才需要；七天内到期的会排到前面提醒它</span>
-      </div>
-      <Checkbox v-model="draft.pinned">常驻：一直记得，不会淡忘</Checkbox>
-      <div class="actions" style="margin-top: 16px">
-        <button class="btn primary" type="button" :disabled="!draft.text.trim()" @click="add">记下</button>
-      </div>
+      <p class="muted" style="margin: 4px 0 12px">它漏记、记错的，可以自己补上；记错的在列表里直接改。</p>
+      <div class="actions"><button class="btn primary" type="button" @click="adding = true">记一条</button></div>
       </template>
     </div>
 
@@ -185,4 +168,29 @@ const remove = guard(async (m) => {
       </ul>
     </div>
   </div>
+  <Modal :open="adding" title="记一条记忆点" @close="adding = false">
+    <p class="muted" style="margin: 0 0 4px">一条一件事，200 字以内。</p>
+    <div class="field">
+      <label for="mem-text">内容</label>
+      <TextArea id="mem-text" v-model="draft.text" rows="3" maxlength="200" counter placeholder="例如：用户的幸运数字是 6" />
+    </div>
+    <div class="field">
+      <label for="mem-kind">类型</label>
+      <Select id="mem-kind" v-model="draft.kind" :options="kindOptions" />
+    </div>
+    <div class="field">
+      <label for="mem-speaker">谁说的</label>
+      <TextField id="mem-speaker" v-model="draft.speaker" placeholder="你本人就留空；群里别人说的写昵称" />
+    </div>
+    <div class="field">
+      <label for="mem-due">到期日</label>
+      <DatePicker id="mem-due" v-model="draft.due" placeholder="不设到期日" />
+      <span class="muted">约定才需要；七天内到期的会排到前面提醒它</span>
+    </div>
+    <Checkbox v-model="draft.pinned">常驻：一直记得，不会淡忘</Checkbox>
+    <template #actions>
+      <button class="btn" type="button" @click="adding = false">取消</button>
+      <button class="btn primary" type="button" :disabled="!draft.text.trim()" @click="add">记下</button>
+    </template>
+  </Modal>
 </template>

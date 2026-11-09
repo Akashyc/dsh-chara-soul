@@ -18,6 +18,7 @@ const tx = computed(() => accentText(ui.accent, mode.value));
 const txRatio = computed(() => contrast(tx.value, SURFACE[mode.value]));
 const dirty = computed(() => JSON.stringify({ ...ui, backdrop: { ...ui.backdrop } }) !== JSON.stringify({ ...saved, backdrop: { ...saved.backdrop } }));
 const picker = ref(null);
+const embedded = document.documentElement.dataset.embed === '1'; // 内嵌时明暗跟着宿主，不给选
 
 const save = guard(async () => {
   await persist((next) => api('PUT', 'settings', { ui: next }));
@@ -27,7 +28,11 @@ onBeforeUnmount(revert); // 没保存就离开设置页：退回已保存的
 </script>
 
 <template>
-  <div class="panel">
+  <div v-if="look.skin" class="panel">
+    <div class="sec"><b>外观</b><span class="cap">Appearance</span></div>
+    <p class="muted" style="margin: 0">主题色和背景由「全鲸封锁」皮肤接管，两边保持一致。要调整请到 DSH 设置 → 全鲸封锁。</p>
+  </div>
+  <div v-else class="panel">
     <div class="sec"><b>主题色</b><span class="cap">Accent</span><span class="muted" style="margin-left: auto">只选一个颜色，其余配色自动推算</span></div>
     <div class="swatches" role="group" aria-label="预设主题色">
       <button v-for="[name, hex] in PRESETS" :key="hex" class="swatch" type="button" :aria-pressed="preset?.[1] === hex" @click="ui.accent = hex">
@@ -57,8 +62,8 @@ onBeforeUnmount(revert); // 没保存就离开设置页：退回已保存的
       <div>{{ label }}<span class="muted">{{ hint }}</span></div>
       <Switch v-model="ui.backdrop[k]" :label="label" />
     </div>
-    <div class="opt">
-      <div>明暗<span class="muted">{{ look.forced ? '内嵌时跟着宿主走，这里的选择在单独打开时生效' : '深色为主；浅色沿用同一套结构' }}</span></div>
+    <div v-if="!embedded" class="opt">
+      <div>明暗<span class="muted">深色为主；浅色沿用同一套结构</span></div>
       <Segmented v-model="ui.theme" :options="THEMES" label="明暗" />
     </div>
 

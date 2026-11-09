@@ -1,12 +1,14 @@
 <script setup>
-// 背景：深空渐变（CSS）+ 星点 + 神经连线（canvas）。固定种子，按视口尺寸生成；只在尺寸、主题色、明暗、开关变化时重画，平时不动。
-// 亮节点用几个 DOM 点叠在上面，「节点脉动」开着时只给它们加 CSS 透明度动画
+// 背景：深空渐变（CSS）+ 星点 + 神经连线（canvas）。固定种子，布局只在尺寸、主题色、明暗、开关变化时重算；
+// 平时以 30 帧慢慢动：少数星点闪烁，节点小幅漂移、连线跟着走，「节点脉动」开着时亮节点呼吸。
+// 页面在后台、系统要求减少动态效果时停在静止的一帧。和「全鲸封锁」皮肤的背景是同一套画法
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { ui, look } from '../theme/ui.js';
 
 const canvas = ref(null);
-const glows = ref([]); // 亮节点 { x, y }
 const embed = () => document.documentElement.dataset.embed === '1'; // App 在 setup 里才标上，不能在模块加载时读
+const still = matchMedia('(prefers-reduced-motion: reduce)');
+const TAU = Math.PI * 2;
 
 /** 固定种子的伪随机数（mulberry32），每次打开图案一样。 */
 function rng(seed) {
@@ -18,7 +20,14 @@ function rng(seed) {
   };
 }
 
-function draw() {
+/** #RRGGBB 加透明度。 */
+function colorAlpha(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a.toFixed(3)})`;
+}
+
+let scene = null;
+function build() {
   const c = canvas.value;
   if (!c) return;
   const w = innerWidth;
@@ -28,72 +37,108 @@ function draw() {
   c.height = h * dpr;
   const g = c.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.clearRect(0, 0, w, h);
-  const css = getComputedStyle(document.documentElement);
-  const ac = css.getPropertyValue('--ac').trim() || '#4C6AFC';
-  const star = look.dark ? '200, 215, 255' : '90, 100, 130';
   const rand = rng(20261109);
   const area = w * h;
-
-  if (ui.backdrop.stars) {
-    for (let i = 0, n = Math.round(area / 2600); i < n; i++) {
-      const r = rand() < 0.92 ? 0.6 : 1.2;
-      g.fillStyle = `rgba(${star}, ${(look.dark ? 0.25 : 0.12) + rand() * (look.dark ? 0.45 : 0.18)})`;
-      g.fillRect(rand() * w, rand() * h, r, r);
+  const stars = !ui.backdrop.stars ? [] : Array.from({ length: Math.round(area / 2600) }, () => ({
+    x: rand() * w, y: rand() * h, r: rand() < 0.92 ? 0.6 : 1.2, a: rand(),
+    tw: rand() < 0.15 ? 0.5 + rand() * 1.5 : 0, ph: rand() * TAU, // 约 15% 的星点闪烁
+  }));
+  const nodes = !ui.backdrop.lattice ? [] : Array.from({ length: Math.round(area / (embed() ? 52000 : 26000)) }, () => ({
+    x: rand() * w, y: rand() * h, ax: 6 + rand() * 10, ay: 6 + rand() * 10,
+    sx: 0.04 + rand() * 0.06, sy: 0.04 + rand() * 0.06, ph: rand() * TAU, lit: rand() < 0.1, px: 0, py: 0,
+  }));
+  // 每个节点连最近的两个，距离太远不连，图案稀疏、不成网格。按初始位置算一次，漂移时连线跟着端点走
+  const links = [];
+  for (const a of nodes) {
+    for (const [b, d] of nodes.filter((b) => b !== a).map((b) => [b, Math.hypot(a.x - b.x, a.y - b.y)]).sort((p, q) => p[1] - q[1]).slice(0, 2)) {
+      if (d <= 240) links.push([a, b, d]);
     }
   }
+  const ac = getComputedStyle(document.documentElement).getPropertyValue('--ac').trim() || '#4C6AFC';
+  scene = { g, w, h, stars, nodes, links, ac, dark: look.dark, star: look.dark ? '200, 215, 255' : '90, 100, 130' };
+}
 
-  const bright = [];
-  if (ui.backdrop.lattice) {
-    const nodes = Array.from({ length: Math.round(area / (embed() ? 52000 : 26000)) }, () => ({ x: rand() * w, y: rand() * h }));
-    g.lineWidth = 1;
-    for (const a of nodes) {
-      // 每个节点连最近的两个，距离太远不连，图案稀疏、不成网格
-      const near = nodes.filter((b) => b !== a).map((b) => [b, Math.hypot(a.x - b.x, a.y - b.y)]).sort((p, q) => p[1] - q[1]).slice(0, 2);
-      for (const [b, d] of near) {
-        if (d > 240) continue;
-        g.strokeStyle = colorAlpha(ac, (look.dark ? 0.22 : 0.16) * (1 - d / 300));
-        g.beginPath();
-        g.moveTo(a.x, a.y);
-        g.lineTo(b.x, b.y);
-        g.stroke();
-      }
-    }
-    for (const n of nodes) {
-      const lit = rand() < 0.1;
-      g.fillStyle = colorAlpha(ac, lit ? 0.9 : look.dark ? 0.45 : 0.35);
+function paint(t) {
+  if (!scene) return;
+  const { g, w, h, stars, nodes, links, ac, dark, star } = scene;
+  g.clearRect(0, 0, w, h);
+  for (const s of stars) {
+    let a = (dark ? 0.25 : 0.12) + s.a * (dark ? 0.45 : 0.18);
+    if (s.tw) a *= 0.55 + 0.45 * Math.sin(t * s.tw + s.ph);
+    g.fillStyle = `rgba(${star}, ${a.toFixed(3)})`;
+    g.fillRect(s.x, s.y, s.r, s.r);
+  }
+  for (const n of nodes) {
+    n.px = n.x + n.ax * Math.sin(t * n.sx + n.ph);
+    n.py = n.y + n.ay * Math.cos(t * n.sy + n.ph);
+  }
+  g.lineWidth = 1;
+  for (const [a, b, d] of links) {
+    g.strokeStyle = colorAlpha(ac, (dark ? 0.22 : 0.16) * (1 - d / 300));
+    g.beginPath();
+    g.moveTo(a.px, a.py);
+    g.lineTo(b.px, b.py);
+    g.stroke();
+  }
+  for (const n of nodes) {
+    const breath = n.lit && ui.backdrop.pulse ? 0.6 + 0.4 * Math.sin(t * 1.05 + n.ph) : 1;
+    if (n.lit) {
+      g.fillStyle = colorAlpha(ac, 0.18 * breath);
       g.beginPath();
-      g.arc(n.x, n.y, lit ? 2 : 1.3, 0, Math.PI * 2);
+      g.arc(n.px, n.py, 8, 0, TAU);
       g.fill();
-      if (lit) bright.push(n);
     }
+    g.fillStyle = colorAlpha(ac, n.lit ? 0.9 * breath : dark ? 0.45 : 0.35);
+    g.beginPath();
+    g.arc(n.px, n.py, n.lit ? 2 : 1.3, 0, TAU);
+    g.fill();
   }
-  glows.value = bright;
 }
 
-/** #RRGGBB 加透明度。 */
-function colorAlpha(hex, a) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a.toFixed(3)})`;
-}
-
+const moving = () => !still.matches && !document.hidden;
 let frame = 0;
+let last = 0;
+function tick(now) {
+  frame = 0;
+  if (!moving()) return;
+  frame = requestAnimationFrame(tick);
+  if (now - last < 33) return; // 30 帧足够，省一半重绘
+  last = now;
+  paint(now / 1000);
+}
+const start = () => {
+  if (!frame && moving()) frame = requestAnimationFrame(tick);
+};
+let pending = 0;
 const later = () => {
-  cancelAnimationFrame(frame);
-  frame = requestAnimationFrame(draw);
+  cancelAnimationFrame(pending);
+  pending = requestAnimationFrame(() => {
+    build();
+    paint(performance.now() / 1000);
+    start();
+  });
 };
 onMounted(() => {
-  draw();
+  build();
+  paint(performance.now() / 1000);
+  start();
   addEventListener('resize', later);
+  document.addEventListener('visibilitychange', start);
+  still.addEventListener('change', later);
 });
-onBeforeUnmount(() => removeEventListener('resize', later));
+onBeforeUnmount(() => {
+  cancelAnimationFrame(frame);
+  cancelAnimationFrame(pending);
+  removeEventListener('resize', later);
+  document.removeEventListener('visibilitychange', start);
+  still.removeEventListener('change', later);
+});
 // 主题色、明暗在根元素上更新后再画，取到的是新颜色
-watch(() => [ui.accent, look.dark, ui.backdrop.stars, ui.backdrop.lattice], later);
+watch(() => [ui.accent, look.dark, ui.backdrop.stars, ui.backdrop.lattice, ui.backdrop.pulse], later);
 </script>
 
 <template>
   <div class="backdrop" aria-hidden="true">
     <canvas ref="canvas"></canvas>
-    <i v-for="(n, k) in glows" :key="k" :class="['glow', { pulse: ui.backdrop.pulse }]" :style="{ left: `${n.x}px`, top: `${n.y}px`, animationDelay: `${-(k % 7) * 0.9}s` }"></i>
   </div>
 </template>

@@ -56,6 +56,7 @@ window.__ModuleLoader__.load({
 
         /** 宿主当前的明暗：优先读 DSH 写在 <html> 上的主题，没有就跟系统走。 */
         function hostTheme() {
+            if (document.body && document.body.hasAttribute('data-ds-dark-theme')) return 'dark' // DSH 自己切明暗用的就是这个属性
             const de = document.documentElement
             const own = de.getAttribute('data-theme') || (de.dataset ? de.dataset.theme : '')
             if (own === 'dark' || own === 'light') return own
@@ -67,6 +68,26 @@ window.__ModuleLoader__.load({
             } catch (e) {
                 return 'light'
             }
+        }
+
+        /** 宿主当前的正文字体：DSH 设置里改字体会写到 body 上，界面消费的是 --dsw-font-family。 */
+        function hostFont() {
+            try {
+                return getComputedStyle(document.body).getPropertyValue('--dsw-font-family').trim()
+            } catch (e) {
+                return ''
+            }
+        }
+
+        /** 明暗与字体一起推给内嵌页面；iframe 的 color-scheme 跟宿主一致，否则浏览器会给它垫一层不透明底色。 */
+        function pushTheme(frame) {
+            const win = frame && frame.contentWindow
+            if (!win) return
+            const theme = hostTheme()
+            frame.style.colorScheme = theme
+            try {
+                win.postMessage({ type: 'chara:theme', theme: theme, font: hostFont() }, location.origin)
+            } catch (e) { /* 跨源或已卸载，忽略 */ }
         }
 
         function buildUrl(data) {
@@ -100,19 +121,13 @@ window.__ModuleLoader__.load({
                 return function () { dead = true }
             }, [attempt])
 
-            // 主题：宿主切明暗时把结果推给内嵌页面，别让面板和界面一黑一白
+            // 主题：宿主切明暗、改字体时把结果推给内嵌页面，别让面板和界面一黑一白
             React.useEffect(function () {
-                const push = function () {
-                    const win = frameRef.current && frameRef.current.contentWindow
-                    if (!win) return
-                    try {
-                        win.postMessage({ type: 'chara:theme', theme: hostTheme() }, location.origin)
-                    } catch (e) { /* 跨源或已卸载，忽略 */ }
-                }
+                const push = function () { pushTheme(frameRef.current) }
                 push()
 
                 // 主题色联动：宿主窗口上装了「全鲸封锁」时它会设 __dshAccent、改色时发 dsh-accent；
-                // 这里转进 iframe，iframe 里保存主题色时再转回宿主。没装皮肤就没人发也没人听，各管各的
+                // 这里转进 iframe，界面收到就把外观交给皮肤。没装皮肤就没人发，各管各的
                 const isHex = function (s) { return typeof s === 'string' && /^#[0-9a-f]{6}$/i.test(s) }
                 const pushAccent = function (accent) {
                     const win = frameRef.current && frameRef.current.contentWindow
@@ -125,15 +140,8 @@ window.__ModuleLoader__.load({
                     const d = (e && e.detail) || {}
                     if (d.source !== 'chara-soul') pushAccent(d.accent)
                 }
-                const onFrameAccent = function (e) {
-                    const win = frameRef.current && frameRef.current.contentWindow
-                    const d = e.data
-                    if (!win || e.source !== win || e.origin !== location.origin || !d || d.type !== 'chara:accent' || !isHex(d.accent)) return
-                    window.dispatchEvent(new CustomEvent('dsh-accent', { detail: { accent: d.accent, source: 'chara-soul' } }))
-                }
                 pushAccent(window.__dshAccent)
                 window.addEventListener('dsh-accent', onHostAccent)
-                window.addEventListener('message', onFrameAccent)
                 let mo = null
                 try {
                     mo = new MutationObserver(push)
@@ -141,6 +149,8 @@ window.__ModuleLoader__.load({
                         attributes: true,
                         attributeFilter: ['data-theme', 'class', 'style'],
                     })
+                    // DSH 的字体和明暗属性写在 body 上
+                    mo.observe(document.body, { attributes: true, attributeFilter: ['style', 'data-ds-dark-theme'] })
                 } catch (e) { /* 老浏览器：只靠下面的一次推送 */ }
                 let media = null
                 try {
@@ -151,7 +161,6 @@ window.__ModuleLoader__.load({
                     if (mo) mo.disconnect()
                     if (media) media.removeEventListener('change', push)
                     window.removeEventListener('dsh-accent', onHostAccent)
-                    window.removeEventListener('message', onFrameAccent)
                 }
             }, [])
 
@@ -169,11 +178,11 @@ window.__ModuleLoader__.load({
                             title: '灵魂狭间',
                             style: S.frame,
                             onLoad: function () {
+                                pushTheme(frameRef.current)
                                 const win = frameRef.current && frameRef.current.contentWindow
                                 if (win) {
                                     try {
-                                        win.postMessage({ type: 'chara:theme', theme: hostTheme() }, location.origin)
-                                        // 皮肤在的话以它的主题色为准，界面那边收到后存进自己的设置
+                                        // 皮肤在的话以它的主题色为准，界面那边收到后交出外观设置
                                         if (/^#[0-9a-f]{6}$/i.test(window.__dshAccent)) win.postMessage({ type: 'chara:accent', accent: window.__dshAccent }, location.origin)
                                     } catch (e) { /* 忽略 */ }
                                 }

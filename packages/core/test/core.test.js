@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createCore } from 'chara-core';
 import { floor5, daysBetween, relative, gap, timeLines } from '../src/chrono/index.js';
-import { buildNature, BOTTOM_LINES } from '../src/nature/index.js';
+import { buildNature, BOTTOM_LINES, BOTTOM_HEAD, BOTTOM_RULES } from '../src/nature/index.js';
 import { readCard } from '../src/card/index.js';
 
 const MIN = 60_000;
@@ -49,6 +49,14 @@ test('本性：底线完整保留，超预算时先裁外貌', () => {
   assert.match(tight, /自称本鱼/, '口吻优先于外貌保留');
   assert.ok([...tight].length <= 620);
   assert.equal(buildNature(card), buildNature(card), '同样输入逐字节相同');
+});
+
+test('本性：底线条目可改，开头一句固定，写空回到默认', () => {
+  const card = { name: '小鲸', personality: '懒' };
+  const own = buildNature(card, null, 2000, '', '1. 不碰 Boss 的工作区以外的文件。');
+  assert.ok(own.includes(`${BOTTOM_HEAD}\n1. 不碰 Boss 的工作区以外的文件。`));
+  assert.ok(!own.includes(BOTTOM_RULES), '改过就不再带默认条目');
+  assert.ok(buildNature(card, null, 2000, '', '   ').includes(BOTTOM_LINES), '空白等于没改');
 });
 
 test('角色卡：BOM 与 CRLF 都能读，缺名字报错', () => {

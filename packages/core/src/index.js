@@ -7,7 +7,7 @@ import { dataHome, ensureHome, pointerFile, readPointer, writePointer, syncFolde
 import { openRoster, newId } from './roster/index.js';
 import { readCard, readYaml, writeText, validateCard, cardText, cardTemplate, profileTemplate, field } from './card/index.js';
 import { readTavernJson, fromTavern } from './card/tavern.js';
-import { buildNature, buildBrief } from './nature/index.js';
+import { buildNature, buildBrief, BOTTOM_RULES } from './nature/index.js';
 import { floor5, zone, timeLines, daysBetween, relative, dateIn } from './chrono/index.js';
 import { openLife } from './memory/life.js';
 import { dreamPrompt, checkDiary } from './memory/dream.js';
@@ -61,6 +61,8 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   };
   const globalFile = () => path.join(home, 'global.md'); // 全局提示词，所有个体共用，不随画像切换
   const readGlobal = () => (existsSync(globalFile()) ? readFileSync(globalFile(), 'utf8') : '');
+  const bottomFile = () => path.join(home, 'bottom.md'); // 用户改过的底线条目；没有就用默认
+  const readBottom = () => (existsSync(bottomFile()) ? readFileSync(bottomFile(), 'utf8') : '');
   const userAvatars = () => imageNames(profileFile().replace(/\.yaml$/, '.avatar')); // 用户头像跟画像放一起：profiles/<画像>.avatar.png
   // 认文件头，只收 PNG、JPG、WebP
   const imageExt = (buf) => {
@@ -85,13 +87,13 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     if (!open.has(id)) open.set(id, { life: openLife(beingDir(id)), nature: '', stamp: '', error: null });
     const b = open.get(id);
     // 角色卡或画像改过就重建本性；改坏了保留上一版并记下错误，不让整轮失败
-    const stamp = `${mtime(cardFile(id))}|${mtime(profileFile())}|${mtime(globalFile())}`;
+    const stamp = `${mtime(cardFile(id))}|${mtime(profileFile())}|${mtime(globalFile())}|${mtime(bottomFile())}`;
     if (stamp !== b.stamp) {
       b.stamp = stamp;
       try {
         const card = readCard(cardFile(id));
         if (card.name !== roster.get(id).name) roster.rename(id, card.name);
-        b.nature = buildNature(card, readYaml(profileFile()), 2000, readGlobal());
+        b.nature = buildNature(card, readYaml(profileFile()), 2000, readGlobal(), readBottom());
         b.error = null;
         // 重塑可回滚：卡（界面里改或手改文件）读得通且和上回不同，就把上一版存进历史
         const text = readFileSync(cardFile(id), 'utf8');
@@ -293,7 +295,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   /** 分身的简报。没有个体或没有任务时返回空串。 */
   function envoyBrief(args = {}) {
     const row = current()?.row;
-    return row && args.task?.trim() ? buildBrief(row.name, args) : '';
+    return row && args.task?.trim() ? buildBrief(row.name, args, readBottom()) : '';
   }
 
   /** 分身完成后的汇报，记在当前个体名下。返回出处，没有个体时返回 null。 */
@@ -337,7 +339,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
 
   /** 用户画像进包的文件：全部画像和各自的头像、全局提示词。 */
   const profileFiles = () =>
-    [...profileIds().flatMap((p) => [path.join(home, 'profiles', `${p}.yaml`), ...imageNames(path.join(home, 'profiles', `${p}.avatar`))]), globalFile()]
+    [...profileIds().flatMap((p) => [path.join(home, 'profiles', `${p}.yaml`), ...imageNames(path.join(home, 'profiles', `${p}.avatar`))]), globalFile(), bottomFile()]
       .map((f) => ({ path: path.relative(home, f).split(path.sep).join('/'), data: readIf(f) }))
       .filter((f) => f.data);
 
@@ -788,7 +790,7 @@ ${material}`;
     preview(fields) {
       const card = pick(fields, CARD_FIELDS);
       const g = readGlobal().trim();
-      const text = buildNature({ ...card, name: card.name?.trim() || '（未命名）' }, readYaml(profileFile()), 2000, g);
+      const text = buildNature({ ...card, name: card.name?.trim() || '（未命名）' }, readYaml(profileFile()), 2000, g, readBottom());
       const cut = ['personality', 'speech', 'appearance'].filter((k) => card[k]?.trim() && !text.includes(card[k].trim()));
       // 全局提示词不占预算，字数里扣掉它（标题、换行和前后空行共 9 字）
       return { nature: text, length: [...text].length - (g ? [...g].length + 9 : 0), budget: 2000, cut };
@@ -832,8 +834,15 @@ ${material}`;
 
 ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
     },
-    global: () => ({ text: readGlobal() }),
-    saveGlobal: ({ text } = {}) => writeText(globalFile(), typeof text === 'string' ? text : ''),
+    /** 全局提示词与底线条目；bottomDefault 给界面「恢复默认」用。 */
+    global: () => ({ text: readGlobal(), bottom: readBottom() || BOTTOM_RULES, bottomDefault: BOTTOM_RULES }),
+    /** 只改给出的项。底线条目为空或和默认一样时删掉文件，回到默认（以后默认更新也能跟上）。 */
+    saveGlobal({ text, bottom } = {}) {
+      if (typeof text === 'string') writeText(globalFile(), text);
+      if (typeof bottom !== 'string') return;
+      if (!bottom.trim() || bottom.trim() === BOTTOM_RULES) rmSync(bottomFile(), { force: true });
+      else writeText(bottomFile(), bottom);
+    },
     /** 设置（005 号决定）：envoyPreset 是本体在自带预设（闲谈陪伴、全能女仆）下时，派分身用的预设。 */
     settings: () => ({ envoyPreset: roster.getState('envoy_preset') ?? 'chara-soul-envoy', ui: uiSettings(roster.getState('ui')) }), // 默认用插件自带的分身预设
     /** 只改给出的项：envoyPreset 分身预设；ui 界面外观（主题色、背景开关、明暗），存在服务端，换端口不丢。 */

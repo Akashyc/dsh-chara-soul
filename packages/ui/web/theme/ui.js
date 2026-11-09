@@ -19,8 +19,8 @@ function cached() {
 // saved：已保存的；ui：正在显示的（外观页选色时实时预览，取消时退回 saved）
 export const saved = reactive(cached());
 export const ui = reactive(structuredClone({ ...saved, backdrop: { ...saved.backdrop } }));
-// forced：内嵌时宿主推来的明暗，优先于用户设置；dark：最终是不是深色
-export const look = reactive({ forced: '', dark: true });
+// forced：内嵌时宿主推来的明暗，优先于用户设置；dark：最终是不是深色；skin：宿主装了「全鲸封锁」，外观由它接管
+export const look = reactive({ forced: '', dark: true, skin: false });
 
 const media = matchMedia('(prefers-color-scheme: dark)');
 
@@ -56,15 +56,15 @@ export async function persist(put) {
   const next = { accent: ui.accent, theme: ui.theme, backdrop: { ...ui.backdrop } };
   await put(next);
   adopt(next);
-  // 在 DSH 侧栏里：告诉宿主，装了「全鲸封锁」的话皮肤跟着换色（adapter-dsh 转发）；没装就没人听
-  if (parent !== window) parent.postMessage({ type: 'chara:accent', accent: next.accent }, location.origin);
 }
 
-/** 宿主皮肤换了主题色：跟着换并存进服务端设置，不再转发回去。正在预览的其它改动不动。 */
+/** 宿主皮肤推来主题色：说明装了皮肤，外观交给它；跟着换色并存进服务端设置。正在预览的其它改动不动。 */
 let followed = '';
 async function follow(accent) {
   accent = accent.toUpperCase();
   followed = accent;
+  look.skin = true;
+  document.documentElement.dataset.skin = '1';
   if (accent === saved.accent.toUpperCase()) return;
   const next = { accent, theme: saved.theme, backdrop: { ...saved.backdrop } };
   ui.accent = accent;
@@ -80,4 +80,7 @@ addEventListener('message', (e) => {
   if (d?.type === 'chara:accent' && isHex(d.accent)) return void follow(d.accent);
   if (!d || d.type !== 'chara:theme') return;
   look.forced = d.theme === 'dark' ? 'dark' : d.theme === 'light' ? 'light' : '';
+  // 宿主当前的正文字体（DSH 设置里可改）；没给就用样式表里的默认
+  if (typeof d.font === 'string' && d.font.length < 600) document.documentElement.style.setProperty('--font', d.font.trim() || null);
+  else document.documentElement.style.removeProperty('--font');
 });

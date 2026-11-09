@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue';
 import { state, current, api, load, guard, go } from './store.js';
-import { adopt } from './theme/ui.js';
+import { adopt, look } from './theme/ui.js';
 import Backdrop from './components/Backdrop.vue';
 import Dossier from './components/Dossier.vue';
 import DialogHost from './components/ui/DialogHost.vue';
@@ -35,7 +35,8 @@ if (embed) document.documentElement.dataset.embed = '1';
 const wide = matchMedia('(min-width: 1280px)');
 const mid = matchMedia('(min-width: 1024px)');
 const layout = ref('');
-const lay = () => (layout.value = embed ? 'one' : wide.matches ? 'three' : mid.matches ? 'two' : 'one');
+// 内嵌也按 iframe 实际宽度排：DSH 把面板放在主区，往往很宽
+const lay = () => (layout.value = wide.matches ? 'three' : mid.matches ? 'two' : 'one');
 wide.addEventListener('change', lay);
 mid.addEventListener('change', lay);
 lay();
@@ -74,7 +75,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <Backdrop />
+  <Backdrop v-if="!look.skin" />
   <div :class="['shell', layout]">
     <aside v-if="layout !== 'one'" class="rail plate" aria-label="导航">
       <div class="brand">
@@ -100,7 +101,7 @@ onMounted(() => {
         <button v-for="[id, label] in TABS" :key="id" role="tab" type="button" :aria-selected="state.tab === id" @click="go(id)">{{ label }}</button>
       </nav>
       <Dossier v-if="layout === 'two'" compact />
-      <component :is="PAGES[state.tab]" />
+      <div :key="state.tab" class="page-in"><component :is="PAGES[state.tab]" /></div>
     </main>
 
     <Dossier v-if="layout === 'three'" />

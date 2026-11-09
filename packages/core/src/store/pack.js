@@ -11,6 +11,7 @@ const ALLOWED = [
   /^beings\/b-[0-9a-f]{10}\/(life\.db|card\.yaml|(avatar|portrait)\.(png|jpg|webp))$/,
   /^profiles\/[\w-]+(\.yaml|\.avatar\.(png|jpg|webp))$/,
   /^global\.md$/,
+  /^bottom\.md$/,
 ];
 export const allowedPath = (p) => ALLOWED.some((re) => re.test(p));
 

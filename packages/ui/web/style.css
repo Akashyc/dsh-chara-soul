@@ -1,14 +1,8 @@
-/* 封锁风（docs/UI design/封锁风重构交接.md）。字体与「全鲸封锁」主题包一致：英文数字 Borda，缺字时退到 Titillium，中文用系统字体。
+/* 封锁风（docs/UI design/封锁风重构交接.md）。字体不内置：内嵌时跟随 DSH 设置的正文字体（adapter 推过来），单独打开时用系统字体。
    深空底 + 星点神经连线；半透明面板、细描边、四角灰刻标、圆角 0。
    主题色只标焦点与主操作：当前页签、选中行、正在用的筛选、聚焦的输入框、主按钮。--ac 系列由 theme/accent.js 写到根元素上
    布局三档由 App 按宽度切 .shell.three / .two / .one；页面内部的分栏按中间面板宽度（容器查询）折行 */
 
-@font-face { font-family: Borda; src: url(./fonts/borda-400.woff2) format('woff2'); font-weight: 400; font-display: swap; }
-@font-face { font-family: Borda; src: url(./fonts/borda-500.woff2) format('woff2'); font-weight: 500; font-display: swap; }
-@font-face { font-family: Borda; src: url(./fonts/borda-600.woff2) format('woff2'); font-weight: 600; font-display: swap; }
-@font-face { font-family: Borda; src: url(./fonts/borda-700.woff2) format('woff2'); font-weight: 700; font-display: swap; }
-@font-face { font-family: Tit; src: url(./fonts/titillium-400.woff2) format('woff2'); font-weight: 400; font-display: swap; }
-@font-face { font-family: Tit; src: url(./fonts/titillium-600.woff2) format('woff2'); font-weight: 600; font-display: swap; }
 
 :root {
   --ac: #4C6AFC; --ac-soft: rgba(76,106,252,.16); --ac-line: rgba(76,106,252,.75); --ac-tx: #9DB5FA; --on-ac: #FFFFFF;
@@ -21,7 +15,7 @@
   --tk: rgba(190,200,225,.45); --empty: rgba(200,215,255,.12); --fill: #c7cfe4;
   --sky: radial-gradient(ellipse at 72% 68%, rgba(70,60,140,.22), transparent 55%), radial-gradient(ellipse at 25% 20%, rgba(40,70,160,.18), transparent 50%), linear-gradient(160deg, var(--bg1), var(--bg0));
   --vig: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.55));
-  --font: Borda, Tit, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color-scheme: dark;
 }
 :root[data-theme="light"] {
@@ -61,9 +55,8 @@ pre { white-space: pre-wrap; word-break: break-word; font: 13px/1.75 var(--font)
 .backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--sky); overflow: hidden; }
 .backdrop::after { content: ''; position: absolute; inset: 0; background: var(--vig); }
 .backdrop canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.glow { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--ac) 45%, transparent), transparent 70%); }
-.glow.pulse { animation: pulse 6s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: .25; } }
+/* 宿主装了「全鲸封锁」：不画自己的背景，透出皮肤的，两边是同一片星空 */
+:root[data-skin] body { background: transparent; }
 
 /* —— 面板：四角刻标画在背景层里，不占元素 —— */
 :root {
@@ -76,6 +69,21 @@ pre { white-space: pre-wrap; word-break: break-word; font: 13px/1.75 var(--font)
   position: relative; border: 1px solid var(--line); background: var(--ticks), var(--plate); background-origin: border-box;
   box-shadow: inset 0 1px 0 var(--hi), var(--shadow); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
 }
+/* 宿主装了「全鲸封锁」：外层面板换成皮肤给 DSH 侧栏的那一套——中性深灰半透明底、无描边、4px 圆角、
+   内缩 6px 的 18px 角标、同样的投影，和左右的 DSH 侧栏看起来是一家 */
+:root[data-skin] {
+  --plate: rgba(17,18,21,.45); --tk: rgba(255,255,255,.18);
+  --shadow: 3px 6px 12px rgba(0,0,0,.40), 10px 20px 40px rgba(0,0,0,.45);
+  --ticks: linear-gradient(var(--tk), var(--tk)) 6px 6px / 18px 1px no-repeat, linear-gradient(var(--tk), var(--tk)) 6px 6px / 1px 18px no-repeat,
+    linear-gradient(var(--tk), var(--tk)) calc(100% - 6px) 6px / 18px 1px no-repeat, linear-gradient(var(--tk), var(--tk)) calc(100% - 6px) 6px / 1px 18px no-repeat,
+    linear-gradient(var(--tk), var(--tk)) 6px calc(100% - 6px) / 18px 1px no-repeat, linear-gradient(var(--tk), var(--tk)) 6px calc(100% - 6px) / 1px 18px no-repeat,
+    linear-gradient(var(--tk), var(--tk)) calc(100% - 6px) calc(100% - 6px) / 18px 1px no-repeat, linear-gradient(var(--tk), var(--tk)) calc(100% - 6px) calc(100% - 6px) / 1px 18px no-repeat;
+}
+:root[data-skin][data-theme="light"] {
+  --plate: rgba(240,241,244,.5); --tk: rgba(20,22,26,.22);
+  --shadow: 3px 5px 10px rgba(15,18,24,.10), 8px 14px 28px rgba(15,18,24,.12);
+}
+:root[data-skin] .plate { border-color: transparent; border-radius: 4px; }
 /* 页面里的分块：比外层面板再浅一层，不带刻标 */
 .panel { position: relative; padding: 18px; border: 1px solid var(--line); background: var(--plate2); }
 .panel + .panel { margin-top: 14px; }
@@ -86,13 +94,18 @@ h3 { margin: 0; font-size: 15px; font-weight: 600; }
 
 /* —— 外壳 —— */
 .shell { position: relative; z-index: 1; display: grid; gap: 28px; min-height: 100vh; padding: 24px; }
-.shell.three { grid-template-columns: 290px minmax(0, 1fr) 340px; max-width: 1760px; margin: 0 auto; perspective: 1600px; }
+.shell.three { grid-template-columns: 290px minmax(0, 1fr) 340px; max-width: 1760px; margin: 0 auto; }
 .shell.two { grid-template-columns: 210px minmax(0, 1fr); gap: 20px; padding: 18px; }
 .shell.one { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 12px 24px; }
 .rail, .dossier { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow: hidden auto; display: flex; flex-direction: column; padding: 22px 18px; }
 .shell.two .rail { top: 18px; max-height: calc(100vh - 36px); padding: 18px 12px; }
-.shell.three .rail { transform: rotateY(3deg); transform-origin: right center; }
-.shell.three .dossier { transform: rotateY(-3deg); transform-origin: left center; padding: 22px; }
+/* 倾斜与「全鲸封锁」下的 DSH 侧栏一致：7°、透视 1000，外侧边为轴，内侧边往里倒。
+   透视写进各自的 transform：放在外壳上时消失点随滚动、随页面高度变，两侧带模糊的面板每帧重画，切页和滚动会卡 */
+.shell.three .rail { transform: perspective(1000px) rotateY(7deg); transform-origin: left center; will-change: transform; }
+.shell.three .dossier { transform: perspective(1000px) rotateY(-7deg); transform-origin: right center; will-change: transform; padding: 22px; }
+/* 切页：中间内容淡入上移，只动透明度和位移；结束后不留 transform，免得影响里面的 fixed 元素 */
+.page-in { animation: page-in 160ms ease-out backwards; }
+@keyframes page-in { from { opacity: 0; transform: translateY(6px); } }
 .stage { min-width: 0; padding: 26px 30px 30px; container-type: inline-size; }
 .shell.one .stage { padding: 0 0 24px; border: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .shell.one .stage::before { display: none; }
@@ -326,6 +339,10 @@ h3 { margin: 0; font-size: 15px; font-weight: 600; }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .dialog-text { white-space: pre-wrap; word-break: break-word; color: var(--tx2); line-height: 1.75; margin-bottom: 20px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+/* 放表单的弹窗：宽一些，内容太高时自己滚 */
+.dialog.modal { width: min(520px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+.modal-body { display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px; }
+.modal-body .field { margin: 0; }
 
 /* 原生 dialog（头像裁剪、看大图）：样式跟上 */
 .crop { padding: 20px; color: var(--tx); border: 1px solid var(--line2); background: var(--pop); box-shadow: var(--shadow); }
