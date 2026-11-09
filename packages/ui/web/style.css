@@ -123,6 +123,11 @@ h2 { margin: 4px 0 18px; font-size: 24px; letter-spacing: .03em; }
 .list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: hidden auto; padding: 3px; }
 .chip { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; background: var(--input); box-shadow: var(--inset); text-align: left; }
 .chip.on { border-color: var(--pink); box-shadow: 0 0 0 2px rgba(255,105,180,.35), var(--inset); }
+.being-row { display: flex; align-items: center; gap: 10px; }
+.being-row .chip { flex: 1; min-width: 0; }
+.chip.asleep { opacity: .55; }
+.conflict { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding: 12px; border-radius: 14px; background: var(--input); box-shadow: var(--inset); }
+.conflict .row { flex-wrap: wrap; align-items: center; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row .btn { flex: none; white-space: nowrap; }
 .empty { text-align: center; padding: 60px 20px; }

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue';
-import { api, load, toast, guard } from '../store.js';
+import { state, api, load, toast, guard } from '../store.js';
 import Select from './Select.vue';
 
 const settings = ref(null); // { envoyPreset, presets: [{ id, name }] | null, home: { home, source, previous, warning } }
@@ -63,6 +63,29 @@ const moveHome = guard(async () => {
   }
 });
 
+/* 打迁移包：全部、只画像，或某一个个体；选好保存的文件夹再打，打进包的个体本机标为已迁出 */
+const packTarget = ref('全部');
+const packing = ref(false);
+const packOptions = computed(() => [
+  { value: '全部', label: '全部：所有个体和用户画像' },
+  { value: '画像', label: '只打包用户画像（含头像与全局提示词）' },
+  ...state.beings.filter((b) => b.status === 'awake' || b.status === 'dormant').map((b) => ({ value: b.id, label: `个体：${b.name}` })),
+]);
+const pack = guard(async () => {
+  if (packing.value) return;
+  packing.value = true;
+  try {
+    const { path } = await api('POST', 'pick-folder');
+    if (!path) return;
+    const moving = packTarget.value !== '画像';
+    if (moving && !confirm(`打包到\n${path}\n\n打进包的个体在本机标为已迁出，不能再切换过去；要撤销，在个体页点它唤醒。继续吗？`)) return;
+    toast((await api('POST', 'migrate', { target: packTarget.value, dir: path })).text.split('\n')[0]);
+    await load();
+  } finally {
+    packing.value = false;
+  }
+});
+
 /** 删除迁移后留下的旧目录里的数据，二次确认。 */
 const removeOld = guard(async () => {
   if (!confirm(`删除旧目录里的数据？\n${settings.value.home.previous}\n删除后不能恢复。`)) return;
@@ -83,6 +106,16 @@ const removeOld = guard(async () => {
         <span class="muted">会话选「Soul·闲谈陪伴」或「Soul·全能女仆」时，派出的分身用这里的预设；会话用别的预设时，分身跟着会话走。</span>
       </div>
       <div class="actions"><button class="btn primary" type="button" @click="savePreset">保存</button></div>
+    </div>
+
+    <!-- 打迁移包：换电脑时用；导入在个体页 -->
+    <div class="panel" style="max-width: 760px; margin-bottom: 18px">
+      <div class="field">
+        <label for="pack-target">打包迁移</label>
+        <Select id="pack-target" v-model="packTarget" :options="packOptions" />
+        <span class="muted">打成一个 .soul 文件，带到另一台电脑上，在个体页「导入角色卡」里选它就行。打进包的个体在本机标为已迁出；只打包画像时个体不受影响。</span>
+      </div>
+      <div class="actions"><button class="btn primary" type="button" :disabled="packing" @click="pack">{{ packing ? '打包中…' : '选择文件夹并打包' }}</button></div>
     </div>
 
     <!-- 数据目录 -->

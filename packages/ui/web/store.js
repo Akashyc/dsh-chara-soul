@@ -43,9 +43,22 @@ export const guard = (fn) => async (...a) => {
   }
 };
 
+export const STATUS = { dormant: '在休眠', migrated: '已迁出' };
+
 export async function use(b) {
   if (b.current) return;
+  if (b.status !== 'awake') {
+    if (!confirm(`「${b.name}」${STATUS[b.status]}，${b.status === 'migrated' ? '在这里唤醒等于撤销迁出（另一台电脑上那份会和这里各过各的），' : ''}唤醒并切换过去吗？`)) return;
+    await api('POST', 'wake', { id: b.id });
+  }
   toast((await api('POST', 'use', { id: b.id })).text);
+  await load();
+}
+
+/** 休眠：只是不出场，年龄照算；要切换过去得先唤醒 */
+export async function sleep(b) {
+  if (!confirm(`让「${b.name}」休眠吗？休眠后要先唤醒才能切换过去${b.current ? '；它是当前个体，休眠后下一轮不注入任何内容' : ''}。`)) return;
+  toast((await api('POST', 'sleep', { id: b.id })).text);
   await load();
 }
 

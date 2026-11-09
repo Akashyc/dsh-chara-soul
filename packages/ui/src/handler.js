@@ -97,14 +97,22 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
       if (is('DELETE', '/api/home')) return core.removeOldHome(), send(200, { ok: true });
       if (is('POST', '/api/new')) return done(core.command(`new ${String((await json()).name ?? '').trim()}`));
       if (is('POST', '/api/use')) return done(core.command(`use ${String((await json()).id ?? '').trim()}`));
+      if (is('POST', '/api/migrate')) {
+        const { target, dir } = await json();
+        if (!/^(全部|画像|b-[0-9a-f]{10})$/.test(String(target)) || typeof dir !== 'string' || !path.isAbsolute(dir) || dir.includes('"')) return send(400, { error: '打包参数不对' });
+        return done(core.command(`migrate ${target} "${dir}"`));
+      }
+      if (is('POST', '/api/sleep')) return done(core.command(`sleep ${String((await json()).id ?? '').trim()}`));
+      if (is('POST', '/api/wake')) return done(core.command(`wake ${String((await json()).id ?? '').trim()}`));
       if (is('POST', '/api/import')) {
         const name = path.basename(q('name'));
-        if (!/\.(png|json|ya?ml)$/i.test(name)) return send(400, { error: '只支持 PNG、JSON、YAML 角色卡' });
+        if (!/\.(png|json|ya?ml|soul)$/i.test(name)) return send(400, { error: '只支持 PNG、JSON、YAML 角色卡和 .soul 灵魂包' });
+        const choice = ['覆盖', '跳过', '新建'].includes(q('conflict')) ? ` ${q('conflict')}` : '';
         const dir = mkdtempSync(path.join(tmpdir(), 'chara-import-'));
         try {
           const file = path.join(dir, name);
           writeFileSync(file, await readBody(req));
-          return done(core.command(`import "${file}"`));
+          return done(core.command(`import "${file}"${choice}`));
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

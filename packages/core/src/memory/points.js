@@ -85,9 +85,10 @@ export function memoryLines(all, now, tz, { max = 20, chars = 800, user } = {}) 
   const live = all.filter((m) => m.replaced_by == null && (m.pinned || urgent(m) || vividness(m, now) >= FADED)).sort((a, b) => rank(b) - rank(a));
   const out = [];
   let used = 0;
-  for (const m of live.slice(0, max)) {
+  for (const m of live) {
+    if (out.length >= max) break;
     const line = memoryLine(m, now, tz, user);
-    if (used + [...line].length > chars) break;
+    if (used + [...line].length > chars) continue; // 世界书条目可能很长，放不下就跳过，留给回想
     out.push(line);
     used += [...line].length;
   }

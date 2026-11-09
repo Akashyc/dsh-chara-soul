@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
-import { state, api, load, use, toast, guard, colorOf, ageText, seenText } from '../store.js';
+import { state, api, load, use, sleep, STATUS, toast, guard, colorOf, ageText, seenText } from '../store.js';
 import Avatar from './Avatar.vue';
 
 /* 牌堆：当前个体在最上面；换人时原来那张塞到最后一个可见位置，像把牌插回牌堆底 */
@@ -46,9 +46,17 @@ const create = guard(async () => {
 
 const file = ref(null);
 const drag = ref(false);
-const importFile = guard(async (f) => {
+// 灵魂包里的个体或画像本机已有时，先停下来让用户选覆盖、跳过还是新建
+const pending = ref(null); // { file, conflicts }
+const importFile = guard(async (f, conflict = '') => {
   if (!f) return;
-  toast((await api('POST', `import?name=${encodeURIComponent(f.name)}`, await f.arrayBuffer(), true)).text);
+  pending.value = null;
+  const r = await api('POST', `import?name=${encodeURIComponent(f.name)}&conflict=${encodeURIComponent(conflict)}`, await f.arrayBuffer(), true);
+  if (r.conflicts) {
+    pending.value = { file: f, conflicts: r.conflicts };
+    return;
+  }
+  toast(r.text);
   await load();
 });
 function picked() {
@@ -88,6 +96,7 @@ function dropped(e) {
           <div class="foot">
             <span class="muted">{{ b.lorebook ? `世界书 ${b.lorebook} 条` : '' }}</span>
             <span v-if="b.error" class="badge warn" :title="b.error">角色卡出错</span>
+            <span v-else-if="b.status !== 'awake'" class="badge silver">{{ STATUS[b.status] }}</span>
             <span v-else class="badge silver">{{ pos(b) === 0 ? '当前' : '点我切换' }}</span>
           </div>
         </button>
@@ -109,20 +118,33 @@ function dropped(e) {
         <div class="field" style="margin-bottom: 0">
           <label>导入角色卡</label>
           <button class="btn" type="button" @click="file.click()">选择文件</button>
-          <input ref="file" type="file" accept=".png,.json,.yaml,.yml" hidden @change="picked">
-          <span class="muted">支持本项目的 YAML，以及 SillyTavern 的 JSON / PNG；电脑上也可以直接拖到卡片上。</span>
+          <input ref="file" type="file" accept=".png,.json,.yaml,.yml,.soul" hidden @change="picked">
+          <span class="muted">支持本项目的 YAML、SillyTavern 的 JSON / PNG，以及迁移用的灵魂包 .soul；电脑上也可以直接拖到卡片上。</span>
+          <div v-if="pending" class="conflict" role="alert">
+            <span>包里的{{ pending.conflicts.join('、') }}本机已有：</span>
+            <div class="row">
+              <button class="btn" type="button" @click="importFile(pending.file, '覆盖')">覆盖本机的</button>
+              <button class="btn" type="button" @click="importFile(pending.file, '跳过')">跳过</button>
+              <button class="btn" type="button" @click="importFile(pending.file, '新建')">新建成新个体</button>
+              <button class="link" type="button" @click="pending = null">取消</button>
+            </div>
+            <span class="muted">对这次所有重复的都生效；画像只有一份，选新建等于跳过。</span>
+          </div>
         </div>
       </div>
       <div class="panel">
         <div class="field" style="margin-bottom: 8px">
           <label>全部个体</label>
-          <span class="muted">点一下切换，下一轮生效</span>
+          <span class="muted">点一下切换，下一轮生效；休眠的点一下先唤醒</span>
         </div>
         <div class="list">
-          <button v-for="b in state.beings" :key="b.id" :class="['chip', { on: b.current }]" type="button" @click="guard(use)(b)">
-            <Avatar :being="b" size="sm" />
-            <span><b>{{ b.name }}</b><br><span class="muted">{{ ageText(b) }} · {{ seenText(b) }}</span></span>
-          </button>
+          <div v-for="b in state.beings" :key="b.id" class="being-row">
+            <button :class="['chip', { on: b.current, asleep: b.status !== 'awake' }]" type="button" @click="guard(use)(b)">
+              <Avatar :being="b" size="sm" />
+              <span><b>{{ b.name }}</b><br><span class="muted">{{ b.status !== 'awake' ? STATUS[b.status] : `${ageText(b)} · ${seenText(b)}` }}</span></span>
+            </button>
+            <button v-if="b.status === 'awake'" class="link" type="button" :aria-label="`让 ${b.name} 休眠`" @click="guard(sleep)(b)">休眠</button>
+          </div>
         </div>
       </div>
     </div>

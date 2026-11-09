@@ -267,7 +267,7 @@ export function apply(ctx, _config, deps = {}) {
       c.tools.register(
         defineTool({
           name: 'chara_recall',
-          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你记下的事和你们的原话。',
+          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你记下的事和你们的原话。用户问起你的日记时，关键词写「日记」给最近一篇，写日期（YYYY-MM-DD）给那天的；日记在这里，不在文件里。',
           parameters: { query: { type: 'string', required: true, description: '关键词，越具体越好，如「猫的名字」写成「猫」' } },
           output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
           execute: async (args) => core.recall(args.query),
@@ -282,7 +282,7 @@ export function apply(ctx, _config, deps = {}) {
       c.tools.register(
         defineTool({
           name: 'chara_remember',
-          description: '把值得长久记住的事记下来：用户的喜好、事实、约定、改口、重要的经历和决定。闲聊、指令、测试不用记；此刻「记得的事」里已有的不要重复记。',
+          description: '把值得长久记住的事记下来：用户的喜好、事实、约定、改口、重要的经历和决定。闲聊、指令、测试不用记；此刻「记得的事」里已有的不要重复记。日记不要记在这里，用 chara_dream 写。',
           // content 放第一个：flash 模型偶尔把后面的参数吞进前一个字符串里，内容在最前面就不会丢（M10 实测）
           parameters: {
             content: { type: 'string', required: true, description: '要记的内容，一句话写清，200 字以内，如「用户的幸运数字是 6」' },
@@ -308,6 +308,26 @@ export function apply(ctx, _config, deps = {}) {
     );
   });
 
+  // 写日记：用户在聊天里让它写时用，和界面按钮、/chara dream 走同一条路
+  ctx.inject(['tools'], (c) => {
+    c.effect(() =>
+      c.tools.register(
+        defineTool({
+          name: 'chara_dream',
+          description: '写日记：用户让你写（或重写）某天的日记时调用。系统按那天你们的原话和记下的事替你写好、存进日记，已有的会被替换。不要自己在回复里编日记，也不要用 chara_remember 记日记。',
+          parameters: { day: { type: 'string', description: '哪天，YYYY-MM-DD；不填就是今天' } },
+          output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
+          async execute(args, exec) {
+            const sid = String(exec?.agent?.session?.id ?? '');
+            if (exec?.agent && !mainSessions.has(sid)) return '分身不写日记。';
+            const r = await writeDiary(null, args.day);
+            return r.text.replace(/\[[tm]\d+\]/g, ''); // 出处编号是给界面的
+          },
+        }),
+      ),
+    );
+  });
+
   // 界面挂在 DSH 自带的本机网页服务上；令牌每次启动重新生成，只通过 /chara ui 给出
   const UI_PATH = '/x-chara-soul';
   const token = randomBytes(16).toString('hex');
@@ -324,14 +344,15 @@ export function apply(ctx, _config, deps = {}) {
       `服务：${SERVICES.map((s) => `${ctx.get?.(s) ? '✓' : '✗'} ${s}`).join('  ')}`,
       `数据目录：${core.home}`,
       `当前会话 ${inv?.agent?.session?.id ?? '?'}，已认作主会话的：${[...mainSessions].join('、') || '无'}`,
-    ].join('\n');
+      core.homeInfo().warning && `⚠️ ${core.homeInfo().warning}`,
+    ].filter(Boolean).join('\n');
 
   ctx.inject(['commands'], (c) => {
     c.effect(() =>
       c.commands.register({
         name: 'chara',
-        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | show | reminisce <关键词> | dream [日期] | profile | status | ui',
-        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | show | reminisce <关键词> | dream [日期] | profile | status | ui' },
+        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> | show | reminisce <关键词> | dream [日期] | profile | status | ui',
+        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> | show | reminisce <关键词> | dream [日期] | profile | status | ui' },
         handler: async (inv) => {
           const raw = String(inv.rawInput ?? '').trim();
           if (raw === 'status') return { kind: 'success', text: status(inv) };

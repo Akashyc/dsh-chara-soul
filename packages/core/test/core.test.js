@@ -163,6 +163,38 @@ test('原话按个体分库，cli 也能读（验收 10 的前提）', async () 
   });
 });
 
+test('迁移第 6 步：记忆点表重建后旧记忆还在、能搜到，来源能写 card', async () => {
+  const { openLife } = await import('../src/memory/life.js');
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = mkdtempSync(path.join(tmpdir(), '迁移 '));
+  try {
+    openLife(dir).close();
+    // 退回第 5 步时的表：来源不认 card
+    const db = new DatabaseSync(path.join(dir, 'life.db'));
+    db.exec(`DROP TABLE memories;
+      CREATE TABLE memories (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, text TEXT NOT NULL, speaker TEXT NOT NULL DEFAULT '用户', due INTEGER, pinned INTEGER NOT NULL DEFAULT 0,
+        origin TEXT NOT NULL CHECK (origin IN ('model', 'rule', 'user')), session TEXT, created INTEGER NOT NULL, touched INTEGER NOT NULL, replaced_by INTEGER);
+      INSERT INTO memories (kind, text, origin, created, touched) VALUES ('fact', '用户养了一只橘猫', 'model', 1, 1);
+      PRAGMA user_version = 5;`);
+    db.close();
+    const life = openLife(dir);
+    assert.equal(life.memories()[0].text, '用户养了一只橘猫');
+    life.addMemory({ kind: 'fact', text: '家在南海', origin: 'card', at: 2 });
+    assert.deepEqual(life.memories().map((m) => m.origin).sort(), ['card', 'model']);
+    assert.equal(life.searchMemories('一只橘猫').length, 1, '全文索引对得上');
+    assert.equal(life.searchMemories('家在南海').length, 1, '新记忆进索引');
+    life.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('此刻：放不下的长记忆跳过，后面短的照样排进去', async () => {
+  const { memoryLines } = await import('../src/memory/points.js');
+  const m = (id, text) => ({ id, kind: 'fact', text, touched: 0, created: 0, pinned: id === 1 ? 1 : 0 });
+  assert.deepEqual(memoryLines([m(1, '长'.repeat(900)), m(2, '短的')], 0, 'UTC'), ['#2 事实：短的']);
+});
+
 test('import：导入写好的卡，注释原样保留；坏卡与不支持的格式拒绝', () =>
   withHome(({ core, home }) => {
     const src = path.join(home, '我的  卡片', 'card.yaml'); // 路径里有连续空格
@@ -230,6 +262,9 @@ test('M6：导入酒馆 V2 JSON 与 V3 PNG，世界书进 lorebook，模型指�
     const card = readCard(cardFile);
     assert.equal(card.first_mes, '用户，你来啦。');
     assert.deepEqual(card.lorebook, [{ keys: ['海'], content: '小鲸 的家在南海' }]);
+    assert.match(r.text, /世界书 1 条成了初始记忆点/);
+    assert.match(core.moment(), /#1 事实：小鲸 的家在南海/, '验收 2：世界书条目成为初始记忆点');
+    assert.equal(core.view.memories(core.view.beings().find((b) => b.name === '小鲸').id).items[0].origin, 'card');
     assert.ok(readFileSync(path.join(path.dirname(cardFile), 'source.json')), '原文件留了一份');
 
     // V3 PNG：同时有 chara 与 ccv3 时取 ccv3
@@ -367,6 +402,12 @@ test('入梦：一天写一篇日记，每句带出处，对不上的丢掉；�
     assert.equal(d.sources.t1, '11/7 10:00 用户：今天去体检了');
     assert.match(d.sources.m1, /记忆 #1：用户今天去体检/);
 
+    // 回想能翻日记：「日记」给最近一篇，带日期给那天的；出处编号去掉
+    assert.equal(core.recall('日记'), '2026-11-07 的日记：\nBoss 今天去体检了。我说辛苦啦。');
+    assert.equal(core.recall('2026-11-7'), core.recall('日记'), '日期不补零也认');
+    assert.equal(core.recall('2026-11-06 日记'), '2026-11-06 没有写日记。');
+    assert.match(core.recall('日记 体检'), /^2026-11-07 的日记：[\s\S]*记得的：[\s\S]*用户今天去体检/, '还带别的关键词时，日记之后照常翻记忆和原话');
+
     assert.deepEqual(core.pendingDreams(), [], '写过的不再补');
     core.view.deleteDiary(id, '2026-11-07');
     assert.deepEqual(core.pendingDreams(), ['2026-11-07'], '删了之后可以重写（验收 9）');
@@ -472,5 +513,120 @@ test('关系：每个个体各写一份；旧画像里的关系搬给当前个�
   } finally {
     core.close();
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('中文用户名：新建、导入时附上不支持的警告，设置页也显示', () => {
+  const home = mkdtempSync(path.join(tmpdir(), '用户名 '));
+  const core = createCore({ home, host: 'test', userHome: 'C:\Users\张三' });
+  try {
+    assert.match(core.command('new 小鲸').text, /⚠️ .*不支持中文用户名/);
+    assert.doesNotMatch(core.command('list').text, /不支持中文用户名/, '别的命令不重复提醒');
+    assert.match(core.homeInfo().warning, /不支持中文用户名/);
+  } finally {
+    core.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+  const home2 = mkdtempSync(path.join(tmpdir(), '用户名 '));
+  const ok = createCore({ home: home2, host: 'test', userHome: '/home/zhang' });
+  assert.doesNotMatch(ok.command('new 小鲸').text, /⚠️/);
+  assert.equal(ok.homeInfo().warning, null);
+  ok.close();
+  rmSync(home2, { recursive: true, force: true });
+});
+
+test('休眠：不能 use、当前个体睡了就不注入；唤醒后第一轮此刻写睡了多久', () =>
+  withHome(({ core, tick }) => {
+    core.command('new 甲');
+    core.command('new 乙'); // 当前是乙
+    core.afterTurn({ session: 's', role: 'user', text: '晚安' });
+    assert.match(core.command('sleep 乙').text, /睡下了。现在没有当前个体/);
+    assert.equal(core.nature(), '', '当前个体睡了，下一轮什么都不注入');
+    assert.match(core.command('list').text, /乙（b-[0-9a-f]+）　在休眠/);
+    assert.match(core.command('use 乙').text, /在休眠，先 wake 乙/);
+    assert.equal(core.command('sleep 乙').ok, false, '已经睡着');
+    assert.equal(core.view.beings().find((b) => b.name === '乙').status, 'dormant');
+
+    tick(3 * DAY);
+    assert.match(core.command('wake 乙').text, /醒了，睡了 3 天/);
+    assert.equal(core.command('wake 乙').ok, false, '本来就醒着');
+    assert.ok(core.command('use 乙').ok);
+    assert.match(core.moment(), /你刚睡醒，这一觉睡了 3 天/);
+    core.afterTurn({ session: 's', role: 'user', text: '早' });
+    assert.match(core.moment(), /你刚睡醒/, '醒后第一句那一轮还在');
+    core.afterTurn({ session: 's', role: 'user', text: '吃了吗' });
+    assert.doesNotMatch(core.moment(), /你刚睡醒/, '之后就不提了');
+
+    assert.match(core.command('sleep 甲').text, /^「甲」睡下了。唤醒用/, '睡的不是当前个体时不动当前');
+    assert.ok(core.nature().includes('你是乙'));
+  }));
+
+test('迁移：全量包带上所有个体和画像，本机标为已迁出；另一台导入后记忆完整；冲突时三选一；迁回不算冲突', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const a = mkdtempSync(path.join(tmpdir(), '迁出 机器'));
+  const b = mkdtempSync(path.join(tmpdir(), '迁入 机器'));
+  const out = path.join(a, '包 放这里');
+  const A = createCore({ home: a, host: 'test', userHome: '/home/x' });
+  const B = createCore({ home: b, host: 'test', userHome: '/home/x' });
+  try {
+    A.command('profile');
+    A.command('new 甲');
+    A.afterTurn({ session: 's', role: 'user', text: '我养了一只橘猫叫芝麻' });
+    A.remember({ content: '用户养了一只橘猫叫芝麻', kind: 'fact' });
+    A.command('new 乙');
+    A.command('sleep 乙');
+    const r = A.command(`migrate 全部 "${out}"`);
+    assert.ok(r.ok, r.text);
+    const file = r.text.match(/打包到 (.+\.soul)/)[1];
+    assert.match(r.text, /2 个个体（甲、乙）和用户画像/);
+    assert.match(A.command('list').text, /甲（b-[0-9a-f]+）　已迁出/);
+    assert.match(A.command('use 甲').text, /已迁出/);
+    assert.equal(A.nature(), '', '当前个体迁走了，本机下一轮不注入');
+
+    assert.ok(B.command(`import "${file}"`).ok);
+    assert.ok(B.command('use 甲').ok);
+    assert.match(B.recall('橘猫'), /用户养了一只橘猫叫芝麻/, '记忆点跟过去了');
+    assert.match(B.recall('芝麻'), /我养了一只橘猫叫芝麻/, '原话跟过去了');
+    assert.ok(existsSync(path.join(b, 'profiles', 'default.yaml')), '画像跟过去了');
+
+    const again = B.command(`import "${file}"`);
+    assert.deepEqual(again.conflicts, ['「甲」', '「乙」', '用户画像']);
+    assert.match(again.text, /没有导入/);
+    assert.match(B.command(`import "${file}" 跳过`).text, /跳过「甲」；跳过「乙」；用户画像保留本机的/);
+    assert.match(B.command(`import "${file}" 新建`).text, /「甲」新建成另一个个体/);
+    assert.equal(B.view.beings().filter((x) => x.name === '甲').length, 2);
+    B.afterTurn({ session: 's', role: 'user', text: '只在 B 上说的话' });
+    assert.match(B.command(`import "${file}" 覆盖`).text, /「甲」覆盖了本机的/);
+    assert.doesNotMatch(B.recall('只在 B 上说'), /只在 B 上说的话/, '覆盖后是包里的那份');
+
+    // 单个个体：B 打包甲，A 那边甲是已迁出，直接迁回
+    const jia = A.command('list').text.match(/甲（(b-[0-9a-f]+)）/)[1];
+    const one = B.command(`migrate ${jia} "${out}"`);
+    assert.ok(one.ok, one.text);
+    const back = A.command(`import "${one.text.match(/打包到 (.+\.soul)/)[1]}"`);
+    assert.equal(back.conflicts, undefined, '已迁出的迁回不算冲突');
+    assert.ok(A.command('use 甲').ok);
+
+    // 只打画像：个体不动
+    assert.match(A.command(`migrate 画像 "${out}"`).text, /已把用户画像打包到/);
+    assert.ok(A.command('use 甲').ok, '画像包不改个体状态');
+
+    // 篡改过的包拒收：多一张表、路径想跳出数据目录
+    const evil = path.join(out, '坏.soul');
+    const db = new DatabaseSync(evil);
+    db.exec("CREATE TABLE pack (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE files (path TEXT PRIMARY KEY, data BLOB NOT NULL); INSERT INTO pack VALUES ('format', '1'), ('kind', '\"migrate\"'), ('beings', '[]'); INSERT INTO files VALUES ('../evil.txt', x'00');");
+    db.close();
+    assert.match(A.command(`import "${evil}"`).text, /不该有的文件：\.\.\/evil\.txt/);
+    const evil2 = path.join(out, '坏2.soul');
+    const db2 = new DatabaseSync(evil2);
+    db2.exec("CREATE TABLE pack (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE files (path TEXT PRIMARY KEY, data BLOB NOT NULL); CREATE TABLE extra (x);");
+    db2.close();
+    assert.match(A.command(`import "${evil2}"`).text, /表结构不对/);
+    assert.match(A.command(`import "${path.join(out, '没有.soul')}"`).text, /没有找到/);
+  } finally {
+    A.close();
+    B.close();
+    rmSync(a, { recursive: true, force: true });
+    rmSync(b, { recursive: true, force: true });
   }
 });

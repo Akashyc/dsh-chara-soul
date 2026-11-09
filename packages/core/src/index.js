@@ -1,9 +1,10 @@
 // 核心入口：不依赖任何宿主。适配器与 cli 都只通过这里访问（架构方案第四节）。
 import path from 'node:path';
-import { statSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync, rmSync, readdirSync, renameSync, mkdirSync } from 'node:fs';
+import { statSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync, rmSync, readdirSync, renameSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import YAML from 'yaml';
-import { dataHome, ensureHome, pointerFile, readPointer, writePointer, syncFolderWarning, copyHome, isEmptyTarget, homeEntries } from './store/index.js';
-import { openRoster } from './roster/index.js';
+import { dataHome, ensureHome, pointerFile, readPointer, writePointer, syncFolderWarning, userNameWarning, copyHome, isEmptyTarget, homeEntries, writePack, readPack } from './store/index.js';
+import { openRoster, newId } from './roster/index.js';
 import { readCard, readYaml, writeText, validateCard, cardText, cardTemplate, profileTemplate, field } from './card/index.js';
 import { readTavernJson, fromTavern } from './card/tavern.js';
 import { buildNature, buildBrief } from './nature/index.js';
@@ -23,7 +24,10 @@ const pick = (o, keys) => Object.fromEntries(keys.filter((k) => typeof o?.[k] ==
  * pointer：指向文件路径，换数据目录时写它；为 null 时不能换（环境变量指定了目录，或测试里没给）。
  * 不传 home 时按「环境变量 → 指向文件 → 默认位置」找目录，指向文件用默认位置下的那份。
  */
-export function createCore({ home, now = Date.now, host = 'unknown', pointer = null } = {}) {
+const STATUS = { awake: '醒着', dormant: '在休眠', migrated: '已迁出', released: '已放生' };
+
+export function createCore({ home, now = Date.now, host = 'unknown', pointer = null, userHome } = {}) {
+  const userWarning = userNameWarning(userHome);
   if (home === undefined) {
     home = ensureHome(dataHome());
     pointer = process.env.CHARA_SOUL_HOME ? null : pointerFile();
@@ -62,6 +66,14 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   const alive = (id) => existsSync(cardFile(id));
   const rows = () => roster.list().filter((r) => alive(r.id));
 
+  /** 世界书条目成为来源为 card 的初始记忆点（验收 2）。条目是设定原文，不受一条 200 字的限制；只在导入时写一次，之后改 card.yaml 不同步。 */
+  function seedLore(id, lorebook) {
+    const life = being(id).life;
+    const items = (Array.isArray(lorebook) ? lorebook : []).map((e) => String(e?.content ?? '').trim()).filter(Boolean);
+    for (const text of items) life.addMemory({ kind: 'fact', text, origin: 'card', at: now() });
+    return items.length;
+  }
+
   function being(id) {
     if (!open.has(id)) open.set(id, { life: openLife(beingDir(id)), nature: '', stamp: '', error: null });
     const b = open.get(id);
@@ -83,7 +95,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
 
   const current = () => {
     const row = roster.current();
-    return row && alive(row.id) ? { row, ...being(row.id) } : null;
+    return row && row.status === 'awake' && alive(row.id) ? { row, ...being(row.id) } : null;
   };
 
   /** 本性：没有个体时为空串，什么都不注入。 */
@@ -97,6 +109,9 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     if (wake && c.life.meta('born_at') == null) c.life.setMeta('born_at', t);
     const tz = zone(c.life.meta('tz'));
     const lines = timeLines({ now: t, born: c.life.meta('born_at'), prev: c.life.meta('prev_user_at'), last: c.life.meta('last_user_at'), tz });
+    // 唤醒后，到用户说第一句话的那一轮为止，告诉它睡了多久
+    const woke = c.life.meta('woke');
+    if (woke && (c.life.meta('prev_user_at') ?? 0) < woke.at) lines.push(`你刚睡醒，这一觉睡了 ${relative(woke.at - woke.slept)}。`);
     const mem = memoryLines(c.life.memories(), t, tz, { user: userName() });
     if (mem.length) lines.push('', '记得的事（#编号是 chara_remember 取代旧记忆时用的；更早、淡了的用 chara_recall 找）：', ...mem);
     return lines.join('\n');
@@ -153,16 +168,26 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   function recall(query) {
     const c = current();
     if (!c) return '还没有个体，没有可回想的。';
-    const q = String(query ?? '').trim();
+    let q = String(query ?? '').trim();
     if (!q) return '要回想什么？给一个关键词。';
+    // 日记：关键词里有「日记」时给最近一篇，带日期时给那天的；出处编号是给界面的，这里去掉
+    const date = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(q);
+    const diaryOut = [];
+    if (date || q.includes('日记')) {
+      const day = date && `${date[1]}-${date[2].padStart(2, '0')}-${date[3].padStart(2, '0')}`;
+      const d = day ? c.life.diary(day) : c.life.diaries()[0];
+      diaryOut.push(d ? `${d.day} 的日记：\n${d.text.replace(/\[[tm]\d+\]/g, '')}` : day ? `${day} 没有写日记。` : '还没写过日记。');
+      q = q.replace(date?.[0] ?? '', '').replace(/日记/g, '').trim();
+      if (!q) return diaryOut[0];
+    }
     const tz = zone(c.life.meta('tz'));
     const when = new Intl.DateTimeFormat('zh-CN', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
     const mems = c.life.searchMemories(q);
     const rows = c.life.searchTurns(q);
-    if (!mems.length && !rows.length) return `记忆和原话里都没有找到「${q}」。`;
+    if (!mems.length && !rows.length) return [...diaryOut, `记忆和原话里都没有找到「${q}」。`].join('\n\n');
     c.life.touchMemories(mems.map((m) => m.id), now());
     const cut = (t) => ([...t].length > 200 ? `${[...t].slice(0, 200).join('')}…` : t);
-    const out = [];
+    const out = diaryOut.length ? [...diaryOut, ''] : [];
     if (mems.length) out.push('记得的：', ...mems.map((m) => `${memoryLine(m, now(), tz, userName())}（${when.format(m.created)} 记下${m.replaced_by != null ? `，后来被 #${m.replaced_by} 取代` : ''}）`));
     if (rows.length) out.push(...(mems.length ? ['', '原话：'] : []), ...rows.map((r) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${cut(r.text.replace(/\s+/g, ' '))}`));
     return out.join('\n');
@@ -224,6 +249,132 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   const ok = (text) => ({ ok: true, text });
   const fail = (text) => ({ ok: false, text });
 
+  // ===== 迁移（M9 第 2 步；004 号决定 2026-11-09 修订）=====
+  const MOVABLE = ['awake', 'dormant'];
+  const CHOICES = ['覆盖', '跳过', '新建'];
+  const readIf = (file) => (existsSync(file) ? readFileSync(file) : null);
+
+  /** 一个个体进包的文件。库用 VACUUM INTO 取一致的快照，DSH 开着也安全；酒馆原图 source.* 不带（004：版权）。 */
+  function beingFiles(id) {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'chara-pack-'));
+    try {
+      const snap = path.join(tmp, 'life.db');
+      being(id).life.store.db.exec(`VACUUM INTO '${snap.replaceAll("'", "''")}'`);
+      const names = ['card.yaml', ...IMAGE_KINDS.flatMap(imageNames)];
+      const files = names.map((n) => ({ path: `beings/${id}/${n}`, data: readIf(path.join(beingDir(id), n)) })).filter((f) => f.data);
+      return [{ path: `beings/${id}/life.db`, data: readFileSync(snap) }, ...files];
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  /** 用户画像进包的文件：当前画像、用户头像、全局提示词。 */
+  const profileFiles = () =>
+    [profileFile(), ...userAvatars(), globalFile()]
+      .map((f) => ({ path: path.relative(home, f).split(path.sep).join('/'), data: readIf(f) }))
+      .filter((f) => f.data);
+
+  /**
+   * 打迁移包。target：「全部」、「画像」，或个体的名字 / id。打进包的个体本机标为已迁出（wake 撤销）。
+   * 包写完先读一遍核对，没问题才改状态。
+   */
+  function migrate(target, dir = path.join(home, 'exports')) {
+    let beings = [];
+    let withProfile = false;
+    if (target === '全部') [beings, withProfile] = [rows().filter((r) => MOVABLE.includes(r.status)), true];
+    else if (target === '画像') withProfile = true;
+    else {
+      const row = roster.find(target, (r) => alive(r.id));
+      if (!row) return fail(`没有叫「${target}」的个体。`);
+      if (!MOVABLE.includes(row.status)) return fail(`「${row.name}」${STATUS[row.status]}，不能打包。`);
+      beings = [row];
+    }
+    const files = [...beings.flatMap((r) => beingFiles(r.id)), ...(withProfile ? profileFiles() : [])];
+    if (!files.length) return fail('没有可以打包的东西。');
+    const d = new Date(now());
+    const p2 = (n) => String(n).padStart(2, '0');
+    const label = target === '全部' || target === '画像' ? target : beings[0].name.replace(/[\\/:*?"<>|\s]/g, '_');
+    const file = path.join(path.resolve(dir), `${label}-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.soul`);
+    writePack(file, { kind: 'migrate', created: now(), beings: beings.map(({ id, name, created_at }) => ({ id, name, created_at })) }, files);
+    readPack(file);
+    for (const r of beings) roster.setStatus(r.id, 'migrated');
+    if (beings.some((r) => r.id === roster.current()?.id)) roster.clearCurrent();
+    const what = [beings.length && `${beings.length} 个个体（${beings.map((r) => r.name).join('、')}）`, withProfile && '用户画像'].filter(Boolean).join('和');
+    return ok(`已把${what}打包到 ${file}\n在另一台电脑上用 import 导入这个文件。${beings.length ? '打进包的个体在本机标为已迁出，不能再 use；要撤销用 wake <名字>。' : ''}`);
+  }
+
+  /** 关掉一个个体打开着的库，导入覆盖它之前用。 */
+  function closeBeing(id) {
+    open.get(id)?.life.close();
+    open.delete(id);
+  }
+
+  /**
+   * 导入迁移包。本机已有同一个个体（同 id）或画像时，没给 choice 就只列出冲突、不动任何东西；
+   * choice 是「覆盖」「跳过」「新建」之一，对这次的所有冲突生效。本机那份是已迁出的直接迁回，不算冲突。
+   * 每个个体先写进临时目录、打开核对过，才替换本机的，写到一半出错本机那份不受影响。
+   */
+  function importSoul(file, choice) {
+    const { meta, files } = readPack(file);
+    if (meta.kind !== 'migrate') return fail('这是放生包，领养还没做。');
+    const beings = Array.isArray(meta.beings) ? meta.beings : [];
+    const ids = new Set(beings.map((b) => b?.id));
+    const bad =
+      beings.some((b) => !/^b-[0-9a-f]{10}$/.test(b?.id) || typeof b.name !== 'string' || !Number.isFinite(b.created_at) || !files.has(`beings/${b.id}/life.db`) || !files.has(`beings/${b.id}/card.yaml`)) ||
+      [...files.keys()].some((p) => p.startsWith('beings/') && !ids.has(p.split('/')[1]));
+    if (bad) return fail('灵魂包不完整，没有导入。');
+    for (const b of beings) validateCard(YAML.parse(Buffer.from(files.get(`beings/${b.id}/card.yaml`)).toString('utf8')));
+
+    const userPaths = [...files.keys()].filter((p) => !p.startsWith('beings/'));
+    const clash = new Set(beings.filter((b) => roster.get(b.id)?.status !== 'migrated' && alive(b.id)).map((b) => b.id));
+    const profileClash = userPaths.some((p) => existsSync(path.join(home, ...p.split('/'))));
+    const names = [...beings.filter((b) => clash.has(b.id)).map((b) => `「${roster.get(b.id).name}」`), ...(profileClash ? ['用户画像'] : [])];
+    if (names.length && !CHOICES.includes(choice)) {
+      return { ok: true, conflicts: names, text: `包里的${names.join('、')}本机已有，没有导入。选一个再导：覆盖本机的、跳过，或新建成新的个体（画像只有一份，新建等于跳过）。\n命令行里用：import "${file}" 覆盖 | 跳过 | 新建` };
+    }
+
+    const report = [];
+    for (const b of beings) {
+      if (clash.has(b.id) && choice === '跳过') {
+        report.push(`跳过「${b.name}」`);
+        continue;
+      }
+      const asNew = clash.has(b.id) && choice === '新建';
+      const id = asNew ? newId('b') : b.id;
+      const staging = `${beingDir(id)}.importing`;
+      rmSync(staging, { recursive: true, force: true });
+      mkdirSync(staging, { recursive: true });
+      try {
+        for (const [p, data] of files) if (p.startsWith(`beings/${b.id}/`)) writeFileSync(path.join(staging, path.basename(p)), data);
+        const life = openLife(staging); // 迁移到本版本；包比程序新时这里拒绝
+        if (asNew) life.setMeta('from', b.id);
+        life.close();
+        readCard(path.join(staging, 'card.yaml'));
+      } catch (e) {
+        rmSync(staging, { recursive: true, force: true });
+        throw new Error(`「${b.name}」没有导入：${e.message}`);
+      }
+      closeBeing(id);
+      rmSync(beingDir(id), { recursive: true, force: true });
+      renameSync(staging, beingDir(id));
+      if (asNew) roster.insert({ id, name: b.name, created_at: now() });
+      else if (roster.get(id)) roster.setStatus(id, 'awake');
+      else roster.insert(b);
+      report.push(asNew ? `「${b.name}」新建成另一个个体（${id}）` : `「${b.name}」${clash.has(b.id) ? '覆盖了本机的' : '已导入'}`);
+    }
+    if (userPaths.length) {
+      if (profileClash && choice !== '覆盖') report.push('用户画像保留本机的');
+      else {
+        for (const p of userPaths) {
+          mkdirSync(path.dirname(path.join(home, ...p.split('/'))), { recursive: true });
+          writeFileSync(path.join(home, ...p.split('/')), files.get(p));
+        }
+        report.push(profileClash ? '用户画像覆盖了本机的' : '用户画像已导入');
+      }
+    }
+    return ok(`${report.join('；')}。${beings.length ? '用 use 切换过去。' : ''}`);
+  }
+
   const commands = {
     new(name) {
       if (!name) return fail('用法：new <名字>');
@@ -234,6 +385,8 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     },
     /** 导入一张写好的卡：校验后建个体并切换过去，原文件不动。本项目的 YAML 注释原样保留；SillyTavern 的 JSON / PNG 先转换。 */
     import(arg) {
+      const soul = arg.match(/^["']?(.+?\.soul)["']?(?:\s+(\S+))?$/i);
+      if (soul) return importSoul(path.resolve(soul[1]), soul[2]);
       const file = arg.replace(/^["']|["']$/g, '');
       if (!file) return fail('用法：import <角色卡文件路径>');
       const ext = path.extname(file).toLowerCase();
@@ -246,32 +399,65 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
         writeText(cardFile(row.id), text);
         copyFileSync(path.resolve(file), path.join(beingDir(row.id), `source${ext}`));
         roster.setCurrent(row.id);
+        const lore = seedLore(row.id, t.lorebook);
         const nature = buildNature(t);
         const notes = [
           !nature.includes(t.personality) && `性格设定有 ${[...t.personality].length} 字，超出本性预算，后半部分会被截掉；建议精简 card.yaml 里的 personality。`,
-          t.lorebook.length && `世界书 ${t.lorebook.length} 条已存进 lorebook，记忆功能上线后成为初始记忆。`,
+          lore && `世界书 ${lore} 条成了初始记忆点，在界面「记忆」页能看到。`,
           t.dropped.length && `没有导入 ${t.dropped.join('、')}：那是给模型的指令，可能和底线冲突。`,
         ].filter(Boolean);
         return ok([`已导入酒馆角色卡「${t.name}」（${row.id}）并切换过去，下一轮生效。`, `转换后的角色卡在 ${cardFile(row.id)}，建议补上口吻（speech）。`, ...notes].join('\n'));
       }
-      if (!/\.ya?ml$/i.test(file)) return fail('只支持本项目的 YAML 角色卡，以及 SillyTavern 的 JSON / PNG 角色卡。');
+      if (!/\.ya?ml$/i.test(file)) return fail('只支持本项目的 YAML 角色卡、SillyTavern 的 JSON / PNG 角色卡，以及灵魂包 .soul。');
       const card = readCard(path.resolve(file));
       const row = roster.add(card.name);
       writeText(cardFile(row.id), readFileSync(path.resolve(file), 'utf8').replace(/^﻿/, ''));
       roster.setCurrent(row.id);
-      return ok(`已导入个体「${card.name}」（${row.id}）并切换过去，下一轮生效。\n角色卡已复制到 ${cardFile(row.id)}，之后改那一份。`);
+      const lore = seedLore(row.id, card.lorebook);
+      return ok(`已导入个体「${card.name}」（${row.id}）并切换过去，下一轮生效。\n角色卡已复制到 ${cardFile(row.id)}，之后改那一份。${lore ? `\n世界书 ${lore} 条成了初始记忆点。` : ''}`);
     },
     list() {
       const cur = roster.current()?.id;
       const list = rows();
-      return ok(list.length ? list.map((r) => `${r.id === cur ? '▶' : ' '} ${r.name}（${r.id}）`).join('\n') : '还没有个体，用 new <名字> 创建。');
+      return ok(list.length ? list.map((r) => `${r.id === cur ? '▶' : ' '} ${r.name}（${r.id}）${r.status === 'awake' ? '' : `　${STATUS[r.status]}`}`).join('\n') : '还没有个体，用 new <名字> 创建。');
     },
     use(key) {
       if (!key) return fail('用法：use <名字或 id>');
       const row = roster.find(key, (r) => alive(r.id));
       if (!row) return fail(`没有叫「${key}」的个体。`);
+      if (row.status !== 'awake') return fail(`「${row.name}」${STATUS[row.status]}，先 wake ${row.name} 唤醒。`);
       roster.setCurrent(row.id);
       return ok(`已切换到「${row.name}」，下一轮生效。`);
+    },
+    /** 打迁移包：migrate <全部 | 画像 | 名字或 id> [目录]，目录默认数据目录下的 exports。 */
+    migrate(arg) {
+      const m = arg.match(/^(\S+)\s*(.*)$/);
+      if (!m) return fail('用法：migrate <全部 | 画像 | 名字或 id> [保存到哪个目录]');
+      return migrate(m[1], m[2].replace(/^["']|["']$/g, '') || undefined);
+    },
+    /** 休眠：只是不出场，年龄照算；当前个体睡了就清空当前，下一轮什么都不注入。 */
+    sleep(key) {
+      if (!key) return fail('用法：sleep <名字或 id>');
+      const row = roster.find(key, (r) => alive(r.id));
+      if (!row) return fail(`没有叫「${key}」的个体。`);
+      if (row.status !== 'awake') return fail(`「${row.name}」${STATUS[row.status]}。`);
+      roster.setStatus(row.id, 'dormant');
+      being(row.id).life.setMeta('slept_at', now());
+      const wasCurrent = roster.current()?.id === row.id;
+      if (wasCurrent) roster.clearCurrent();
+      return ok(`「${row.name}」睡下了。${wasCurrent ? '现在没有当前个体，下一轮不注入任何内容；用 use 换一个。' : ''}唤醒用 wake ${row.name}。`);
+    },
+    /** 唤醒：对已迁出的个体等于撤销迁出。不自动切换过去。 */
+    wake(key) {
+      if (!key) return fail('用法：wake <名字或 id>');
+      const row = roster.find(key, (r) => alive(r.id));
+      if (!row) return fail(`没有叫「${key}」的个体。`);
+      if (row.status === 'awake') return fail(`「${row.name}」本来就醒着。`);
+      roster.setStatus(row.id, 'awake');
+      const life = being(row.id).life;
+      const slept = life.meta('slept_at');
+      if (slept != null) life.setMeta('woke', { slept, at: now() });
+      return ok(`「${row.name}」醒了${slept != null ? `，睡了 ${relative(now() - slept)}` : ''}。用 use ${row.name} 切换过去。`);
     },
     show() {
       const c = current();
@@ -285,7 +471,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
       if (!existsSync(f)) writeText(f, profileTemplate());
       return ok(`用户画像在 ${f}，编辑保存后下一轮生效。`);
     },
-    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | show | reminisce <关键词> | dream [日期] | profile'),
+    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> [目录] | show | reminisce <关键词> | dream [日期] | profile'),
   };
 
   /** 用户命令。raw 是子命令及参数的原文，如 "use 蒂普茜柯"。 */
@@ -296,7 +482,9 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     const h = Object.hasOwn(commands, sub) ? commands[sub] : null;
     if (!h) return fail(`未知子命令 ${sub}。${commands.help().text}`);
     try {
-      return h(arg.trim());
+      const r = h(arg.trim());
+      // 新建、导入是第一次上手的地方，在这里提醒不支持中文用户名
+      return userWarning && r.ok && (sub === 'new' || sub === 'import') ? { ...r, text: `${r.text}\n⚠️ ${userWarning}` } : r;
     } catch (e) {
       return fail(`${sub} 出错：${e.message}`);
     }
@@ -331,6 +519,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
           id: r.id,
           name: r.name,
           current: r.id === cur,
+          status: r.status,
           bornDays: born == null ? null : daysBetween(born, now(), zone(b.life.meta('tz'))),
           lastSeen: last == null ? null : relative(now() - last),
           first_mes: card.first_mes ?? '',
@@ -455,7 +644,7 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
       home,
       source: !pointer ? 'env' : readPointer(pointer) ? 'pointer' : 'default',
       previous: previous && !same(previous, home) && existsSync(path.join(previous, 'roster.db')) ? previous : null,
-      warning: syncFolderWarning(home),
+      warning: [userWarning, syncFolderWarning(home)].filter(Boolean).join('\n') || null,
     };
   }
 

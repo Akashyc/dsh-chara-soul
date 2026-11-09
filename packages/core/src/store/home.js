@@ -47,6 +47,13 @@ export function syncFolderWarning(dir) {
     : null;
 }
 
+/** 系统用户目录里有非英文字符（中文用户名）时返回警告，否则 null。不支持这种账户：DSH 与依赖的路径处理没在上面测过（2026-11-09 用户定）。 */
+export function userNameWarning(home = homedir()) {
+  return /[^\x00-\x7f]/.test(home)
+    ? `系统用户目录 ${home} 含中文或其他非英文字符。本插件不支持中文用户名的系统账户，可能读写出错甚至丢数据；请换用英文用户名的账户。`
+    : null;
+}
+
 /** 建好数据目录；macOS 与 Linux 上设为仅本人可读写。 */
 export function ensureHome(dir = dataHome()) {
   mkdirSync(dir, { recursive: true });

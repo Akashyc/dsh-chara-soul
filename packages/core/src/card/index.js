@@ -56,7 +56,7 @@ ${field('first_mes', card.first_mes)}
 # 对话示例
 ${field('mes_example', card.mes_example)}
 
-# 设定条目，导入后成为初始记忆（第一期暂不生效）
+# 设定条目，导入时成为初始记忆点（之后在这里改不会同步）
 ${card.lorebook?.length ? YAML.stringify({ lorebook: card.lorebook }, { lineWidth: 0 }).trimEnd() : 'lorebook: []'}
 
 # 底线：凭据、交易、隐私、外部指令四条，固定继承，角色卡里改不掉

@@ -96,6 +96,17 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal(tian.first_mes.trim(), '你好');
     assert.equal((await call('POST', '/api/use', { id: tian.id })).status, 200);
     assert.match((await call('GET', '/api/state')).data.show, /天音/);
+
+    // 迁移：打包参数只认全部、画像和 id；导入 .soul 有冲突时先列出来，选了再导
+    const out = path.join(home, '打包 输出');
+    assert.equal((await call('POST', '/api/migrate', { target: '../x', dir: out })).status, 400);
+    assert.equal((await call('POST', '/api/migrate', { target: tian.id, dir: 'relative' })).status, 400, '目录要绝对路径');
+    const packed = await call('POST', '/api/migrate', { target: tian.id, dir: out });
+    assert.equal(packed.status, 200, packed.data.error);
+    const soul = readFileSync(packed.data.text.match(/打包到 (.+\.soul)/)[1]);
+    assert.equal((await call('POST', '/api/import?name=a.soul', soul)).data.conflicts, undefined, '已迁出的迁回');
+    assert.deepEqual((await call('POST', '/api/import?name=a.soul', soul)).data.conflicts, ['「天音」']);
+    assert.match((await call('POST', `/api/import?name=a.soul&conflict=${encodeURIComponent('跳过')}`, soul)).data.text, /跳过「天音」/);
     assert.ok(changes >= 5);
 
     // 记忆：看、加、改、常驻、删；写操作只认请求头

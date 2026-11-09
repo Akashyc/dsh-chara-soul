@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { dataHome, defaultHome, pointerFile, writePointer, copyHome, syncFolderWarning, ensureHome, openDb, migrate, ftsIndex, search } from 'chara-core/store';
+import { dataHome, defaultHome, pointerFile, writePointer, copyHome, syncFolderWarning, userNameWarning, ensureHome, openDb, migrate, ftsIndex, search } from 'chara-core/store';
 
 const STEPS = [
   'CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL)',
@@ -91,6 +91,8 @@ test('同步文件夹提示', () => {
   assert.match(syncFolderWarning('/Users/z/Library/Mobile Documents/com~apple~CloudDocs/soul'), /同步文件夹/);
   assert.match(syncFolderWarning('/home/z/Dropbox/soul'), /同步文件夹/);
   assert.equal(syncFolderWarning('/home/z/.local/share/dsh-chara-soul'), null);
+  assert.match(userNameWarning('C:\\Users\\张三'), /不支持中文用户名/);
+  assert.equal(userNameWarning('C:\\Users\\zhang san'), null);
   assert.equal(syncFolderWarning('/home/z/MyDropboxNotes'), null);
 });
 

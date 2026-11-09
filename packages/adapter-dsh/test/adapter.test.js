@@ -218,10 +218,11 @@ test('入梦：沿用主会话的模型写日记；/chara dream 立即写；回�
   let t = Date.parse('2026-11-07T02:00:00Z'); // 上海 11 月 7 日 10:00
   const core = createCore({ home, host: 'dsh', now: () => t });
   try {
-    const { ctx, emit, run, services } = fakeCtx();
+    const { ctx, emit, run, services, tools } = fakeCtx();
     apply(ctx, {}, { core });
     await run('new 小鲸');
     const id = core.view.beings()[0].id;
+    const dreamTool = tools.find((t) => t.name === 'chara_dream');
     assert.equal((await run('dream')).kind, 'error', '没有模型调用服务时报错，不崩');
 
     const calls = [];
@@ -252,6 +253,13 @@ test('入梦：沿用主会话的模型写日记；/chara dream 立即写；回�
     assert.match(calls[0].system, /你是小鲸/);
     assert.equal(calls[0].purpose, 'chara-dream');
     assert.deepEqual(core.view.diaries(id).map((d) => d.day), ['2026-11-07']);
+
+    assert.match(await dreamTool.execute({}, { agent: { session: { id: 'c-9' } } }), /分身不写/);
+    reply = '今天又聊了一次。[t1]';
+    const out = await dreamTool.execute({ day: '2026-11-07' }, { agent: { session: { id: 'session-1' } } });
+    assert.match(out, /已写好 2026-11-07 的日记/, '聊天里让它写，用工具写进日记表');
+    assert.ok(!out.includes('[t1]'), '给模型的结果不带出处编号');
+    assert.match(core.view.diaries(id)[0].text, /今天又聊了一次/);
 
     reply = 'fail';
     assert.match((await run('dream')).text, /RATE_LIMIT/, '按错误代码报');
