@@ -107,6 +107,11 @@ test('界面接口：令牌、新建、改卡与预览、画像、导入', async
     assert.equal((await call('POST', '/api/import?name=a.soul', soul)).data.conflicts, undefined, '已迁出的迁回');
     assert.deepEqual((await call('POST', '/api/import?name=a.soul', soul)).data.conflicts, ['「天音」']);
     assert.match((await call('POST', `/api/import?name=a.soul&conflict=${encodeURIComponent('跳过')}`, soul)).data.text, /跳过「天音」/);
+
+    // 放生：草稿能读；没有模型时起草不了履历；保存位置要绝对路径
+    assert.equal((await call('GET', `/api/release?id=${tian.id}`)).data.name, '天音');
+    assert.equal((await call('POST', `/api/release/resume?id=${tian.id}`, { memories: [] })).status, 400);
+    assert.equal((await call('POST', `/api/release?id=${tian.id}`, { dir: 'relative' })).status, 400);
     assert.ok(changes >= 5);
 
     // 记忆：看、加、改、常驻、删；写操作只认请求头

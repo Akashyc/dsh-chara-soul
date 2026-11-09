@@ -101,6 +101,15 @@ export function apply(ctx, _config, deps = {}) {
     }
   }
 
+  /** 界面放生时一键起草履历；模型调用失败时把错误代码写进结果，不抛。 */
+  async function writeResume(id, sel) {
+    try {
+      return { ok: true, text: await core.releaseResume({ ...sel, id, complete }) };
+    } catch (e) {
+      return { ok: false, text: `起草履历失败（${e?.code ?? e?.message ?? e}）` };
+    }
+  }
+
   /** 醒来补做：把之前聊过天、还没写日记的日子补上。在回复之后后台写，不拖慢回复；同一时间只写一份。 */
   let dreaming = false;
   async function catchUp() {
@@ -332,7 +341,7 @@ export function apply(ctx, _config, deps = {}) {
   const UI_PATH = '/x-chara-soul';
   const token = randomBytes(16).toString('hex');
   ctx.inject(['webServer'], (c) => {
-    c.effect(() => c.webServer.register({ kind: 'prefix', path: UI_PATH, handler: createUiHandler(core, { prefix: UI_PATH, token, onChange: () => sync(), presets: listPresets, dream: writeDiary }) }));
+    c.effect(() => c.webServer.register({ kind: 'prefix', path: UI_PATH, handler: createUiHandler(core, { prefix: UI_PATH, token, onChange: () => sync(), presets: listPresets, dream: writeDiary, resume: writeResume }) }));
   });
   const uiLink = () => {
     const port = ctx.get?.('webServer')?.port;
@@ -351,12 +360,13 @@ export function apply(ctx, _config, deps = {}) {
     c.effect(() =>
       c.commands.register({
         name: 'chara',
-        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> | show | reminisce <关键词> | dream [日期] | profile | status | ui',
-        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> | show | reminisce <关键词> | dream [日期] | profile | status | ui' },
+        description: '角色灵魂引擎：new <名字> | import <角色卡路径> | list | use <名字> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> | release | show | reminisce <关键词> | dream [日期] | profile | status | ui',
+        input: { hint: 'new <名字> | import <角色卡路径> | list | use <名字> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> | release | show | reminisce <关键词> | dream [日期] | profile | status | ui' },
         handler: async (inv) => {
           const raw = String(inv.rawInput ?? '').trim();
           if (raw === 'status') return { kind: 'success', text: status(inv) };
           if (raw === 'ui') return { kind: 'success', text: uiLink() };
+          if (/^release\b/.test(raw)) return { kind: 'success', text: `${core.command('release').text}\n${uiLink()}` };
           const dream = /^dream(?:\s+(\S+))?$/.exec(raw);
           if (dream) {
             const r = await writeDiary(null, dream[1]);

@@ -260,12 +260,21 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     try {
       const snap = path.join(tmp, 'life.db');
       being(id).life.store.db.exec(`VACUUM INTO '${snap.replaceAll("'", "''")}'`);
-      const names = ['card.yaml', ...IMAGE_KINDS.flatMap(imageNames)];
-      const files = names.map((n) => ({ path: `beings/${id}/${n}`, data: readIf(path.join(beingDir(id), n)) })).filter((f) => f.data);
-      return [{ path: `beings/${id}/life.db`, data: readFileSync(snap) }, ...files];
+      return [{ path: `beings/${id}/life.db`, data: readFileSync(snap) }, ...cardFiles(id)];
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  }
+
+  /** 角色卡和自己传的头像、形象图。 */
+  const cardFiles = (id) =>
+    ['card.yaml', ...IMAGE_KINDS.flatMap(imageNames)].map((n) => ({ path: `beings/${id}/${n}`, data: readIf(path.join(beingDir(id), n)) })).filter((f) => f.data);
+
+  /** 包的文件名：<标签>-年月日-时分.soul，标签里不能放文件名用不了的字符。 */
+  function packFile(dir, label) {
+    const d = new Date(now());
+    const p2 = (n) => String(n).padStart(2, '0');
+    return path.join(path.resolve(dir), `${label.replace(/[\\/:*?"<>|\s]/g, '_')}-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.soul`);
   }
 
   /** 用户画像进包的文件：当前画像、用户头像、全局提示词。 */
@@ -291,10 +300,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     }
     const files = [...beings.flatMap((r) => beingFiles(r.id)), ...(withProfile ? profileFiles() : [])];
     if (!files.length) return fail('没有可以打包的东西。');
-    const d = new Date(now());
-    const p2 = (n) => String(n).padStart(2, '0');
-    const label = target === '全部' || target === '画像' ? target : beings[0].name.replace(/[\\/:*?"<>|\s]/g, '_');
-    const file = path.join(path.resolve(dir), `${label}-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.soul`);
+    const file = packFile(dir, target === '全部' || target === '画像' ? target : beings[0].name);
     writePack(file, { kind: 'migrate', created: now(), beings: beings.map(({ id, name, created_at }) => ({ id, name, created_at })) }, files);
     readPack(file);
     for (const r of beings) roster.setStatus(r.id, 'migrated');
@@ -307,6 +313,88 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   function closeBeing(id) {
     open.get(id)?.life.close();
     open.delete(id);
+  }
+
+  // ===== 放生（M9 第 3 步；004 号决定 2026-11-09 修订）：不打包数据库，只带用户挑的 =====
+  const stripSources = (text) => text.replace(/\s*\[[tm]\d+\]/g, ''); // 原话不进包，出处编号指不回去
+  const one = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+  const RELEASE_MAX = 2000;
+
+  /** 相处多久，只给到粗粒度（004：时间最细到季节或年）。 */
+  function together(life) {
+    const t = life.turnTimes();
+    if (!t.length) return '还没聊过天';
+    return t.at(-1) - t[0] < DAY ? '不到一天' : `大约 ${relative(t.at(-1) - t[0])}`;
+  }
+
+  /** 放生前给界面的草稿：可勾选的记忆点和日记，从画像起草的一句（不带名字和称呼），相处多久。 */
+  function releaseDraft(id) {
+    const life = being(known(id)).life;
+    let pf = {};
+    try {
+      pf = readYaml(profileFile()) ?? {};
+    } catch {}
+    const parts = [one(pf.traits) && `是个${one(pf.traits)}的人`, one(pf.likes) && `喜欢${one(pf.likes)}`].filter(Boolean);
+    return {
+      id,
+      name: roster.get(id).name,
+      kinds: KINDS,
+      together: together(life),
+      memories: life.memories().filter((m) => m.replaced_by == null).map(({ id, kind, text }) => ({ id, kind, text })),
+      diaries: life.diaries().map(({ day, text }) => ({ day, text: stripSources(text) })),
+      profileLine: parts.length ? `我陪过一位前主人，${parts.join('，')}。` : '',
+    };
+  }
+
+  /** 选中的记忆点和日记；id、日期都只认这个个体自己有的，界面传来什么都不直接信。 */
+  function picked(life, memories, diaries) {
+    const ms = new Set((Array.isArray(memories) ? memories : []).map(Number));
+    const ds = new Set((Array.isArray(diaries) ? diaries : []).map(String));
+    return {
+      memories: life.memories().filter((m) => m.replaced_by == null && ms.has(m.id)).map(({ kind, text }) => ({ kind, text })),
+      diaries: life.diaries().filter((d) => ds.has(d.day)).map(({ day, text }) => ({ day, text: stripSources(text) })),
+    };
+  }
+
+  /** 一键起草履历：从选中的记忆、日记和相处时长，让模型照 004 那张「不能写」的表写。complete 由宿主提供。 */
+  async function releaseResume({ id, memories, diaries, complete }) {
+    const c = being(known(id));
+    const sel = picked(c.life, memories, diaries);
+    // shortcut: 材料超过 8000 字时直接截断，回忆特别多再改成均匀抽取
+    const material = [`相处：${together(c.life)}`, '记得的事：', ...sel.memories.map((m) => `- ${KINDS[m.kind] ?? m.kind}：${m.text}`), '日记：', ...sel.diaries.map((d) => `【${d.day}】${d.text}`)].join('\n').slice(0, 8000);
+    const prompt = `你要被放生了：离开现在的主人，去一位新主人那里。给新主人写一份你的履历，第一人称，150 到 400 字：你是谁、陪过前主人多久、一起大致做过哪些事、你因此成了什么样。
+只用下面的材料，不编造。必须避开：名字、昵称和称呼；地点、学校、公司、项目名；精确到月、日的时间（最细到季节或年）；原话引用；文件路径、账号、网址；第三个人；身体、情感、家庭等私事。只输出履历正文。
+
+${material}`;
+    return String(await complete({ system: c.nature, prompt, maxTokens: 2000 })).trim();
+  }
+
+  /**
+   * 放生：把用户挑的打成放生包，核对能读后删掉本机文件，名册留一行（已放生）。
+   * 带：角色卡、自己传的头像和形象图、选中的记忆点与日记、画像那一句、履历。不带：原话、分身汇报、没选的。
+   */
+  function release({ id, memories, diaries, profileLine = '', resume = '', dir }) {
+    const row = roster.get(known(id));
+    if (!MOVABLE.includes(row.status)) return fail(`「${row.name}」${STATUS[row.status]}，不能放生。`);
+    if (!dir) return fail('要选一个保存放生包的文件夹。');
+    const life = being(id).life;
+    const sel = picked(life, memories, diaries);
+    const meta = {
+      kind: 'release',
+      created: now(),
+      being: { name: row.name, born_at: life.meta('born_at'), tz: life.meta('tz') },
+      ...sel,
+      profileLine: String(profileLine).trim().slice(0, RELEASE_MAX),
+      resume: String(resume).trim().slice(0, RELEASE_MAX),
+    };
+    const file = packFile(dir, `${row.name}-放生`);
+    writePack(file, meta, cardFiles(id));
+    readPack(file);
+    closeBeing(id);
+    rmSync(beingDir(id), { recursive: true, force: true });
+    roster.setStatus(id, 'released');
+    if (roster.current()?.id === id) roster.clearCurrent();
+    return ok(`「${row.name}」已放生，放生包在 ${file}\n带走了 ${sel.memories.length} 条回忆、${sel.diaries.length} 篇日记${meta.profileLine ? '、关于你的一句话' : ''}${meta.resume ? '和履历' : ''}；本机的原话、记忆和日记都已删除。把这个文件交给领养的人就行。`);
   }
 
   /**
@@ -435,6 +523,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
       if (!m) return fail('用法：migrate <全部 | 画像 | 名字或 id> [保存到哪个目录]');
       return migrate(m[1], m[2].replace(/^["']|["']$/g, '') || undefined);
     },
+    release: () => fail('放生要挑带走的记忆、看过预览才打包，只能在界面里做：用 ui 打开界面，在个体页点它旁边的「放生」。'),
     /** 休眠：只是不出场，年龄照算；当前个体睡了就清空当前，下一轮什么都不注入。 */
     sleep(key) {
       if (!key) return fail('用法：sleep <名字或 id>');
@@ -471,7 +560,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
       if (!existsSync(f)) writeText(f, profileTemplate());
       return ok(`用户画像在 ${f}，编辑保存后下一轮生效。`);
     },
-    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> [目录] | show | reminisce <关键词> | dream [日期] | profile'),
+    help: () => ok('子命令：new <名字> | import <角色卡路径> | list | use <名字或 id> | sleep <名字> | wake <名字> | migrate <全部 | 画像 | 名字> [目录] | release | show | reminisce <关键词> | dream [日期] | profile'),
   };
 
   /** 用户命令。raw 是子命令及参数的原文，如 "use 蒂普茜柯"。 */
@@ -724,7 +813,7 @@ ${YAML.stringify(pick(fields, PROFILE_FIELDS), { lineWidth: 0 })}`);
   } catch {} // 卡或画像读不了时不搬，不影响启动；本性那边会报出具体错误
 
   return {
-    nature, moment, afterTurn, remember, recall, dream, pendingDreams, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
+    nature, moment, afterTurn, remember, recall, dream, pendingDreams, releaseDraft, releaseResume, release, envoyBrief, envoyReport, command, view, close, homeInfo, moveHome, removeOldHome,
     get home() {
       return home;
     },

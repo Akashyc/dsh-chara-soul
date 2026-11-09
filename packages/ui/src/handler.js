@@ -30,7 +30,7 @@ function readBody(req) {
  * pickFolder：弹「选择文件夹」对话框，测试时换成假的。
  * dream：(个体 id, 日期) → { ok, text }，写一篇日记（要调模型，DSH 适配器提供）；独立运行时没有。
  */
-export function createUiHandler(core, { prefix = '', token, onChange = () => {}, presets = async () => null, pickFolder = systemPicker, dream = null }) {
+export function createUiHandler(core, { prefix = '', token, onChange = () => {}, presets = async () => null, pickFolder = systemPicker, dream = null, resume = null }) {
   if (!token) throw new Error('界面需要访问令牌');
   return async (req, res) => {
     const send = (code, body, type = 'application/json; charset=utf-8') => {
@@ -72,6 +72,7 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
       if (is('GET', '/api/global')) return send(200, core.view.global());
       if (is('GET', '/api/memories')) return send(200, core.view.memories(q('id')));
       if (is('GET', '/api/diaries')) return send(200, core.view.diaries(q('id')));
+      if (is('GET', '/api/release')) return send(200, core.releaseDraft(q('id')));
       if (is('GET', '/api/settings')) return send(200, { ...core.view.settings(), presets: await presets().catch(() => null), home: core.homeInfo() });
       if (!headerOk) return send(403, { error: '写操作需要请求头令牌' });
 
@@ -88,6 +89,17 @@ export function createUiHandler(core, { prefix = '', token, onChange = () => {},
         if (!dream) return send(400, { error: '写日记要调用模型，只能在 DSH 里用' });
         const r = await dream(q('id'), q('day'));
         return send(r.ok ? 200 : 400, r.ok ? r : { error: r.text });
+      }
+      if (is('POST', '/api/release/resume')) {
+        if (!resume) return send(400, { error: '起草履历要调用模型，只能在 DSH 里用；也可以自己写' });
+        const { memories, diaries } = await json();
+        const r = await resume(q('id'), { memories, diaries });
+        return send(r.ok ? 200 : 400, r.ok ? r : { error: r.text });
+      }
+      if (is('POST', '/api/release')) {
+        const body = await json();
+        if (typeof body.dir !== 'string' || !path.isAbsolute(body.dir)) return send(400, { error: '要选一个保存放生包的文件夹' });
+        return done(core.release({ ...body, id: q('id') }));
       }
       if (is('DELETE', '/api/diaries')) return core.view.deleteDiary(q('id'), q('day')), send(200, { ok: true });
       if (is('PUT', '/api/settings')) return core.view.saveSettings(await json()), send(200, { ok: true });

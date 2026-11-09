@@ -9,9 +9,10 @@ import GlobalPage from './components/GlobalPage.vue';
 import MomentPage from './components/MomentPage.vue';
 import MemoryPage from './components/MemoryPage.vue';
 import SettingsPage from './components/SettingsPage.vue';
+import ReleasePage from './components/ReleasePage.vue';
 
 const TABS = [['beings', '个体'], ['card', '角色卡'], ['profile', '画像'], ['global', '全局提示词'], ['moment', '此刻'], ['memory', '记忆'], ['settings', '设置']];
-const PAGES = { beings: BeingsPage, card: CardPage, profile: ProfilePage, global: GlobalPage, moment: MomentPage, memory: MemoryPage, settings: SettingsPage };
+const PAGES = { beings: BeingsPage, card: CardPage, profile: ProfilePage, global: GlobalPage, moment: MomentPage, memory: MemoryPage, settings: SettingsPage, release: ReleasePage }; // 放生页不在页签里，从个体页进
 
 /* 内嵌（DSH 侧栏面板等）：宿主只给宽度，页面自己撑满；样式上用 data-embed 收紧留白、收起品牌行 */
 const embed = new URLSearchParams(location.search).has('embed');

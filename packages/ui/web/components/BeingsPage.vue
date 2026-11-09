@@ -144,6 +144,7 @@ function dropped(e) {
               <span><b>{{ b.name }}</b><br><span class="muted">{{ b.status !== 'awake' ? STATUS[b.status] : `${ageText(b)} · ${seenText(b)}` }}</span></span>
             </button>
             <button v-if="b.status === 'awake'" class="link" type="button" :aria-label="`让 ${b.name} 休眠`" @click="guard(sleep)(b)">休眠</button>
+            <button v-if="b.status === 'awake' || b.status === 'dormant'" class="link bad" type="button" :aria-label="`放生 ${b.name}`" @click="state.releasing = b.id; state.tab = 'release'">放生</button>
           </div>
         </div>
       </div>

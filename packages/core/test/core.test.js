@@ -630,3 +630,58 @@ test('迁移：全量包带上所有个体和画像，本机标为已迁出；�
     rmSync(b, { recursive: true, force: true });
   }
 });
+
+test('放生：只带用户挑的，原话不进包；履历提示词只用选中的材料；打包后本机删除、名册留行', async () => {
+  const { readPack } = await import('chara-core/store');
+  const home = mkdtempSync(path.join(tmpdir(), '放生 '));
+  let t = T0;
+  const core = createCore({ home, now: () => t, host: 'test', userHome: '/home/x' });
+  try {
+    core.command('profile');
+    const pf = readFileSync(path.join(home, 'profiles', 'default.yaml'), 'utf8');
+    writeFileSync(path.join(home, 'profiles', 'default.yaml'), pf.replace('name: ', 'name: 张三').replace('traits: |', 'traits: |\n  温柔，有点倔'));
+    core.command('new 小鲸');
+    const id = core.view.beings()[0].id;
+    core.afterTurn({ session: 's', role: 'user', text: '我住在杭州西湖边' });
+    t += 400 * DAY;
+    core.afterTurn({ session: 's', role: 'user', text: '今天加班到很晚' });
+    core.remember({ content: '用户喜欢下雨天', kind: 'preference' });
+    core.remember({ content: '用户住在杭州', kind: 'fact' });
+    {
+      await core.dream({ complete: async () => '今天 Boss 加班到很晚，我陪着他。[t2]' });
+      const d = core.releaseDraft(id);
+      assert.equal(d.memories.length, 2);
+      assert.equal(d.diaries[0].text, '今天 Boss 加班到很晚，我陪着他。', '出处编号去掉');
+      assert.match(d.profileLine, /是个温柔，有点倔的人/);
+      assert.doesNotMatch(d.profileLine, /张三/, '不带名字');
+      assert.equal(d.together, '大约 1 年');
+
+      const keep = d.memories.find((m) => m.text === '用户喜欢下雨天').id;
+      let prompt = '';
+      const resume = await core.releaseResume({ id, memories: [keep], diaries: [], complete: async (o) => ((prompt = o.prompt), ' 我是小鲸。 ') });
+      assert.equal(resume, '我是小鲸。');
+      assert.match(prompt, /用户喜欢下雨天/);
+      assert.doesNotMatch(prompt, /杭州/, '没选的不进提示词');
+      assert.match(prompt, /必须避开：名字/);
+
+      const r = core.release({ id, memories: [keep, 99999], diaries: [d.diaries[0].day], profileLine: '我陪过一位温柔的前主人。', resume, dir: path.join(home, '出 口') });
+      assert.ok(r.ok, r.text);
+      const file = r.text.match(/放生包在 (.+\.soul)/)[1];
+      const { meta, files } = readPack(file);
+      assert.equal(meta.kind, 'release');
+      assert.deepEqual(meta.memories, [{ kind: 'preference', text: '用户喜欢下雨天' }], '只带选中的，界面多传的 id 不认');
+      assert.deepEqual(meta.diaries.map((x) => x.text), ['今天 Boss 加班到很晚，我陪着他。']);
+      assert.equal(meta.resume, '我是小鲸。');
+      assert.deepEqual([...files.keys()], [`beings/${id}/card.yaml`], '不带库');
+      assert.ok(!readFileSync(file).includes(Buffer.from('西湖')), '原话一个字都不在包里');
+      assert.ok(!existsSync(path.join(home, 'beings', id)), '本机文件删了');
+      assert.equal(core.view.beings().length, 0);
+      assert.equal(core.nature(), '', '当前个体放生了，下一轮不注入');
+      assert.match(core.command(`import "${file}"`).text, /放生包/);
+      assert.match(core.command('release').text, /只能在界面里做/);
+    }
+  } finally {
+    core.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
