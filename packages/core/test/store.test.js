@@ -64,6 +64,14 @@ for (const fts of [true, false]) {
     assert.deepEqual(search(s, 'notes', 'body', '100%').map((r) => r.body), ['折扣 100% 真的'], '通配符被转义');
     assert.equal(search(s, 'notes', 'body', '%').length, 1);
     assert.equal(search(s, 'notes', 'body', '"引号"').length, 0, '引号不会弄坏查询');
+    // 整句查不到时模糊查：去掉标点后按两字一段比，含其中至少三分之一的行算命中，并标上 fuzzy
+    assert.equal(search(s, 'notes', 'body', '世界卡').fuzzy, undefined, '原句命中不标 fuzzy');
+    const near = search(s, 'notes', 'body', '世界卡原文');
+    assert.deepEqual(near.map((r) => r.body), ['用户是写世界卡的'], '多带了字也能找到');
+    assert.equal(near.fuzzy, true);
+    assert.deepEqual(search(s, 'notes', 'body', '年轮图 下周三').map((r) => r.body), ['答应下周三一起看年轮图'], '几个词连写也能找到');
+    assert.deepEqual(search(s, 'notes', 'body', '「仓库，只能用」').map((r) => r.body), ['这个仓库只能用 pnpm'], '标点不一样也能找到');
+    assert.equal(search(s, 'notes', 'body', '完全不相干的世界').length, 0, '只沾一点边的不算');
 
     s.db.prepare("UPDATE notes SET body = '用户改写剧本了' WHERE body LIKE '%世界卡%'").run();
     assert.equal(search(s, 'notes', 'body', '世界卡').length, 0, '更新后旧内容查不到');

@@ -240,6 +240,8 @@ export function apply(ctx, _config, deps = {}) {
           },
           output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
           async execute(args, exec) {
+            // 实测（11/10）：查不到原话时常派分身去翻 life.db，一趟一两分钟，翻到的也就是 chara_recall 能给的
+            if (/life\.db|turns\s*表/i.test(String(args.task ?? ''))) return '没有派出分身：原话和记忆都在 chara_recall 里，分身翻库也找不到更多。自己用 chara_recall 查：换原话里真会出现的词，拆短一点；查到编号后用 open 拿全文。';
             const brief = core.envoyBrief(args);
             if (!brief) return '没有个体或没有任务，没有派出分身。';
             const subagents = ctx.get?.('subagents');
@@ -276,7 +278,7 @@ export function apply(ctx, _config, deps = {}) {
       c.tools.register(
         defineTool({
           name: 'chara_recall',
-          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你记下的事和你们的原话。用户问起你的日记时，关键词写「日记」给最近一篇，写日期（YYYY-MM-DD）给那天的；日记在这里，不在文件里。结果里带 [m3] [t12] [e…] 编号的可以填 open 继续展开：记忆点 → 当时的原话 → 当时派出的分身 → 分身的汇报。',
+          description: '回想和用户以前聊过的事：用户提到过去的事、问你还记不记得、或你需要以前说过的细节时，按关键词翻你记下的事和你们的原话。你的记忆以这里为准：回想往事先用这个，别先去翻 DSH 的会话记录。用户要原文时直接把查到的贴在回复里，不要写成文件、不要派分身导出。用户问起你的日记时，关键词写「日记」给最近一篇，写日期（YYYY-MM-DD）给那天的；日记在这里，不在文件里。结果里带 [m3] [t12] [e…] 编号的可以填 open 继续展开：记忆点 → 当时的原话 → 当时派出的分身 → 分身的汇报。',
           parameters: {
             query: { type: 'string', description: '关键词，越具体越好，如「猫的名字」写成「猫」；填了 open 就不用填' },
             open: { type: 'string', description: '要展开的编号，如 m3、t12、e 开头的分身编号；不展开就不填' },

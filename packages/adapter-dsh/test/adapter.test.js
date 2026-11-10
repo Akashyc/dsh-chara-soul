@@ -166,6 +166,8 @@ test('分身：chara_envoy 派出带底线的简报，结算时把任务与汇�
     assert.match(await remember.execute({ content: '' }, exec), /^没有记下/);
     assert.match(core.moment(), /#2 事实：幸运数字是 6/);
     assert.match(await envoy.execute({ task: '再派一个' }, { agent: { session: { id: 'c-0' } } }), /你自己就是分身/, '分身不能再派分身');
+    assert.match(await envoy.execute({ task: '去 life.db 的 turns 表里按「肥皂泡」检索，逐字导出原文' }, exec), /没有派出分身.*chara_recall/, '找原话不派分身');
+    assert.equal(sent.length, 0);
     assert.match(await envoy.execute({ task: '修复 a.js 的空指针', acceptance: '测试通过', context: 'Boss 只用 npm' }, exec), /c-1 已出发/);
     const brief = sent[0].request.prompt[0].text;
     assert.ok(sent[0].request.parent === exec.agent && sent[0].delivery === 'parent');

@@ -797,6 +797,8 @@ test('逐层回想：记忆 → 当时的原话 → 当时派出的分身 → �
     core.view.addMemory(core.view.beings()[0].id, { text: '用户养了猫' });
 
     assert.match(core.recall('照片'), /\[t1\][\s\S]*用 open 填/);
+    assert.doesNotMatch(core.recall('照片'), /字面相近/, '原句命中不标');
+    assert.match(core.recall('整理照片的原话'), /没找到「整理照片的原话」这句原话，下面是字面相近的[\s\S]*\[t1\]/, '模糊命中要标出来');
     const m1 = core.expand('m1');
     assert.match(m1, /记忆 #1：帮用户按月份整理了照片/);
     assert.match(m1, /用户：帮我整理桌面上的照片 \[t1\]/);
@@ -807,6 +809,12 @@ test('逐层回想：记忆 → 当时的原话 → 当时派出的分身 → �
     assert.match(core.expand('m2'), /用户在界面里加的.*没有当时的原话/);
     assert.match(core.expand('m9'), /没有记忆 #9/);
     assert.match(core.expand('x'), /认不出/);
+
+    // 点名展开的那条给全文（不截断、保留换行），前后的照旧截断
+    const long = '第一行\n' + '长'.repeat(300) + '尾巴';
+    core.afterTurn({ session: 's', role: 'user', text: long });
+    assert.ok(core.expand('t3').includes(`用户：${long} [t3]`));
+    assert.ok(!core.expand('t2').includes('尾巴'));
   }));
 
 test('多份画像：新建复制当前的并切换过去，切换后本性跟着变；正在用的不能删；迁移包带上全部画像', () =>

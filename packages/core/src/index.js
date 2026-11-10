@@ -208,9 +208,10 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     const when = new Intl.DateTimeFormat('zh-CN', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
     const mems = c.life.searchMemories(q);
     const rows = c.life.searchTurns(q);
-    if (!mems.length && !rows.length) return [...diaryOut, `记忆和原话里都没有找到「${q}」。`].join('\n\n');
-    c.life.touchMemories(mems.map((m) => m.id), now());
+    if (!mems.length && !rows.length) return [...diaryOut, `记忆和原话里都没有找到「${q}」。换成原话里真会出现的词（别用自己起的标题），拆短一点再查；原话全在这里，派分身去翻库或文件也找不到更多。`].join('\n\n');
+    if (!mems.fuzzy) c.life.touchMemories(mems.map((m) => m.id), now()); // 字面相近的不一定相关，不让它们回升
     const out = diaryOut.length ? [...diaryOut, ''] : [];
+    if ((mems.length && mems.fuzzy) || (rows.length && rows.fuzzy)) out.push(`没找到「${q}」这句原话，下面是字面相近的，可能不相关：`, '');
     if (mems.length) out.push('记得的：', ...mems.map((m) => `${memoryLine(m, now(), tz, userName())}（${when.format(m.created)} 记下${m.replaced_by != null ? `，后来被 #${m.replaced_by} 取代` : ''}）`));
     if (rows.length) out.push(...(mems.length ? ['', '原话：'] : []), ...rows.map((r) => turnLine(r, when)));
     out.push('', '要看某条当时前后的原话和派出的分身，用 open 填它的编号（记忆写 m 加编号，如 m3；原话写 t12）。');
@@ -218,7 +219,8 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
   }
 
   const cut = (t, n = 200) => ([...t].length > n ? `${[...t].slice(0, n).join('')}…` : t);
-  const turnLine = (r, when) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${cut(r.text.replace(/\s+/g, ' '))} [t${r.id}]`;
+  // full：点名展开的那一条给原文全文，免得为了逐字原文再派分身去翻会话文件
+const turnLine = (r, when, full = false) => `${when.format(r.at)} ${r.role === 'user' ? '用户' : '你'}：${full ? r.text : cut(r.text.replace(/\s+/g, ' '))} [t${r.id}]`;
   const NEAR = 30 * 60_000; // 原话前后半小时内派出的分身算「当时派出的」
 
   /**
@@ -230,10 +232,10 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     if (!c) return '还没有个体，没有可回想的。';
     const r = String(ref ?? '').trim().replace(/^#/, 'm');
     const when = new Intl.DateTimeFormat('zh-CN', { timeZone: zone(c.life.meta('tz')), year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-    const around = (session, at) => {
+    const around = (session, at, focus) => {
       const turns = c.life.turnsAround(session, at);
       const envoys = c.life.envoysBetween(session, at - NEAR, at + NEAR);
-      return [...(turns.length ? ['当时前后的原话：', ...turns.map((t) => turnLine(t, when))] : ['当时前后没有原话。']), ...(envoys.length ? ['', '当时派出的分身：', ...envoys.map((e) => `${when.format(e.at)} 去办「${cut(e.task, 80)}」 [e${e.id}]`)] : [])];
+      return [...(turns.length ? ['当时前后的原话：', ...turns.map((t) => turnLine(t, when, t.id === focus))] : ['当时前后没有原话。']), ...(envoys.length ? ['', '当时派出的分身：', ...envoys.map((e) => `${when.format(e.at)} 去办「${cut(e.task, 80)}」 [e${e.id}]`)] : [])];
     };
     let m = /^m(\d+)$/.exec(r);
     if (m) {
@@ -244,7 +246,7 @@ export function createCore({ home, now = Date.now, host = 'unknown', pointer = n
     }
     if ((m = /^t(\d+)$/.exec(r))) {
       const t = c.life.turn(Number(m[1]));
-      return t ? around(t.session, t.at).join('\n') : `没有原话 t${m[1]}。`;
+      return t ? around(t.session, t.at, t.id).join('\n') : `没有原话 t${m[1]}。`;
     }
     if ((m = /^e(.+)$/.exec(r))) {
       const e = c.life.envoy(m[1]);

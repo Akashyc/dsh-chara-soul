@@ -13,6 +13,7 @@ export async function api(method, route, body, raw) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error ?? `请求失败（${r.status}）`);
+  if (method !== 'GET') state.rev++; // 写成功一次就记一次，左侧读数据此刷新
   return data;
 }
 
@@ -20,7 +21,7 @@ export async function api(method, route, body, raw) {
 export const avatarUrl = (b, kind = 'avatar') => `${base}/api/${kind}?id=${encodeURIComponent(b.id)}&t=${encodeURIComponent(token)}&v=${b[kind]}`;
 
 // dirty：当前页有没保存的改动（角色卡、画像页写入），切页签和关页面前据此提醒
-export const state = reactive({ beings: [], show: '', tab: 'beings', toast: null, tint: {}, dirty: false, releasing: null });
+export const state = reactive({ beings: [], show: '', tab: 'beings', toast: null, tint: {}, dirty: false, releasing: null, rev: 0 });
 export const current = computed(() => state.beings.find((b) => b.current));
 
 export async function load() {

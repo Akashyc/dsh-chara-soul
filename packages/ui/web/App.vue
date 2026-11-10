@@ -60,7 +60,7 @@ const refreshReads = async () => {
     reads.value = null;
   }
 };
-watch(() => [current.value?.id, state.tab, layout.value], refreshReads);
+watch(() => [current.value?.id, state.tab, layout.value, state.rev], refreshReads);
 
 // 关窗口、刷新、侧栏面板被卸载时，浏览器自带的「离开此页」提示
 addEventListener('beforeunload', (e) => {

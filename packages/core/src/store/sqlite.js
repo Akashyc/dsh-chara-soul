@@ -80,16 +80,37 @@ export function ftsIndex(store, table, columns) {
 /**
  * 在 table.column 里查包含 query 的行（返回整行）。
  * 三个字及以上且有 FTS 时走 trigram 索引；否则退化为 LIKE。
+ * 整句查不到时模糊查：去掉标点和空白后按每两个字一段比，含其中至少三分之一（且不少于两段）的行算命中，
+ * 命中段多的排前面（「人生就像泡沫」「七日誓言原文」「乐园奠基 齐响诗班」这类少了标点、多带了字、
+ * 或几个词连写的查询也能找到）。
  * shortcut: 不足三个字的词走 LIKE 全表扫描，单个库记忆点上了十万条后再按架构方案 11.1 另建短词索引。
+ * shortcut: 模糊查要把整张表读进来逐行比，单表上了十万行、一次超过几十毫秒时再换成二字索引。
  */
 export function search(store, table, column, query, limit = 20) {
   const t = ident(table);
   const c = ident(column);
-  if (store.fts && [...query].length >= 3) {
-    return store.db
+  const exact = store.fts && [...query].length >= 3
+    ? store.db
       .prepare(`SELECT ${t}.* FROM ${t}_fts JOIN ${t} ON ${t}.rowid = ${t}_fts.rowid WHERE ${t}_fts.${c} MATCH ? ORDER BY rank LIMIT ?`)
-      .all(`"${query.replaceAll('"', '""')}"`, limit);
-  }
-  const like = `%${query.replace(/[\\%_]/g, (m) => '\\' + m)}%`;
-  return store.db.prepare(`SELECT * FROM ${t} WHERE ${c} LIKE ? ESCAPE '\\' ORDER BY rowid DESC LIMIT ?`).all(like, limit);
+      .all(`"${query.replaceAll('"', '""')}"`, limit)
+    : store.db
+      .prepare(`SELECT * FROM ${t} WHERE ${c} LIKE ? ESCAPE '\\' ORDER BY rowid DESC LIMIT ?`)
+      .all(`%${query.replace(/[\\%_]/g, (m) => '\\' + m)}%`, limit);
+  if (exact.length) return exact;
+  const norm = (text) => [...String(text ?? '').replace(/[\s\p{P}\p{S}]/gu, '')];
+  const q = norm(query);
+  const grams = [...new Set(q.slice(1).map((ch, i) => q[i] + ch))];
+  const need = Math.max(2, Math.ceil(grams.length / 3));
+  if (grams.length < need) return [];
+  const near = store.db.prepare(`SELECT * FROM ${t}`).all()
+    .map((row) => {
+      const text = norm(row[c]).join('');
+      return [row, grams.filter((g) => text.includes(g)).length];
+    })
+    .filter(([, n]) => n >= need)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([row]) => row);
+  near.fuzzy = true; // 告诉调用方这是字面相近、不是原句命中，可能不相关
+  return near;
 }
