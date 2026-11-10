@@ -7,7 +7,7 @@
 
 ## 当前状态
 
-当前版本 1.0.1（1.0.0 是第一个发布版本，第一期的功能都在里面；1.0.1 让回想更好用、少派分身，见 CHANGELOG）。从 GitHub 安装（装 `main` 分支最新代码）或从源码安装；没有发布到 npm。
+当前版本 1.1.0（1.0.0 是第一个发布版本，第一期的功能都在里面；1.0.1 让回想更好用、少派分身；1.1.0 背景换成 3D，见 CHANGELOG）。从 GitHub 安装（装 `main` 分支最新代码）或从源码安装；没有发布到 npm。
 
 ![大肥鱼人生架构](https://raw.githubusercontent.com/Akashyc/dsh-chara-soul/main/assets/architecture.jpg)
 

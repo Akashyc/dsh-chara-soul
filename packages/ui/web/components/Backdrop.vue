@@ -1,9 +1,11 @@
 <script setup>
 // 背景：深空渐变（CSS）+ 星点 + 神经连线（canvas）。固定种子，布局只在尺寸、主题色、明暗、开关变化时重算；
 // 平时以 30 帧慢慢动：少数星点闪烁，节点小幅漂移、连线跟着走，「节点脉动」开着时亮节点呼吸。
-// 页面在后台、系统要求减少动态效果时停在静止的一帧。和「全鲸封锁」皮肤的背景是同一套画法
+// 页面在后台、系统要求减少动态效果时停在静止的一帧。和「全鲸封锁」皮肤的背景是同一套画法。
+// 能拿到 WebGL 就画 3D 的（deepField.js），拿不到退回下面这套 2D 画法
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { ui, look } from '../theme/ui.js';
+import { createDeepField } from './deepField.js';
 
 const canvas = ref(null);
 const embed = () => document.documentElement.dataset.embed === '1'; // App 在 setup 里才标上，不能在模块加载时读
@@ -26,15 +28,27 @@ function colorAlpha(hex, a) {
   return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a.toFixed(3)})`;
 }
 
+const moving = () => !still.matches && !document.hidden;
 let scene = null;
+let field = null; // WebGL 画法；一块 canvas 拿了 webgl 就拿不到 2d，所以挂载时定一次
 function build() {
   const c = canvas.value;
   if (!c) return;
   const w = innerWidth;
   const h = innerHeight;
-  const dpr = Math.min(2, devicePixelRatio || 1);
+  const dpr = Math.min(field ? 1.5 : 2, devicePixelRatio || 1); // 3D 背景本来就糊在下面，1.5 倍够了
   c.width = w * dpr;
   c.height = h * dpr;
+  if (field) {
+    const css = getComputedStyle(document.documentElement);
+    // 浅色底上用加深过的主题色（--ac-tx），和浅色下的强调字同一套
+    const hex = css.getPropertyValue(look.dark ? '--ac' : '--ac-tx').trim() || '#4C6AFC';
+    const n = parseInt(hex.slice(1), 16);
+    const b = ui.backdrop;
+    field.build({ w, h, dpr, dark: look.dark, accent: [n >> 16, (n >> 8) & 255, n & 255], stars: b.stars, lattice: b.lattice, pulse: b.pulse, rand: rng(20261109) });
+    scene = {};
+    return;
+  }
   const g = c.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   const rand = rng(20261109);
@@ -60,6 +74,7 @@ function build() {
 
 function paint(t) {
   if (!scene) return;
+  if (field) return field.paint(t, moving());
   const { g, w, h, stars, nodes, links, ac, dark, star } = scene;
   g.clearRect(0, 0, w, h);
   for (const s of stars) {
@@ -95,7 +110,6 @@ function paint(t) {
   }
 }
 
-const moving = () => !still.matches && !document.hidden;
 let frame = 0;
 let last = 0;
 function tick(now) {
@@ -119,6 +133,7 @@ const later = () => {
   });
 };
 onMounted(() => {
+  field = createDeepField(canvas.value);
   build();
   paint(performance.now() / 1000);
   start();
@@ -132,6 +147,7 @@ onBeforeUnmount(() => {
   removeEventListener('resize', later);
   document.removeEventListener('visibilitychange', start);
   still.removeEventListener('change', later);
+  field?.dispose();
 });
 // 主题色、明暗在根元素上更新后再画，取到的是新颜色
 watch(() => [ui.accent, look.dark, ui.backdrop.stars, ui.backdrop.lattice, ui.backdrop.pulse], later);
